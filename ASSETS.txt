@@ -1,0 +1,14 @@
+Frutiger Aero wallpaper supplied by the user in this conversation:
+frutiger_aero_wallpaper_by_elfwink_dgwoh12.png
+The original PNG is embedded unchanged in source/Brand.cs (BuiltinArtwork).
+SHA-256: 88642ff9fef4f3a424509d8cda605617367094336c63bf18d7e7465d77426108
+
+Visual styling reference supplied by the user:
+windows-basic-vista-11-colorized-versions-of-the-windows-v0-nw9xynq9zpq71.webp
+Used as a reference for panel colors and borders; not embedded as window controls.
+Existing application/engine licensing notices are retained separately.
+
+Video supplied by the user: frutiger-aero-office.3840x2160.mp4
+First frame extracted at original 3840x2160 resolution using FFmpeg JPEG quality 2.
+Embedded as a static image in BuiltinNightArtwork; no video playback.
+Vista frame is code-drawn from the supplied reference; no opaque reference image is overlaid.

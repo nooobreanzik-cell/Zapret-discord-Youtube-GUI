@@ -1,0 +1,24 @@
+Zapret GUI 0.4 — неофициальная оболочка для Windows 11 x64.
+
+Включает сборку Flowseal zapret-discord-youtube 1.10.3.
+https://github.com/Flowseal/zapret-discord-youtube
+Лицензия MIT и уведомления авторов: licenses/Flowseal-MIT.txt.
+Движок zapret: https://github.com/bol-van/zapret (MIT).
+
+WinDivert: https://github.com/basil00/WinDivert
+Лицензионные условия LGPLv3 / GPLv2 приведены в licenses/WinDivert-LICENSE.txt.
+Исходные тексты: https://github.com/basil00/WinDivert/releases
+
+Cygwin: https://cygwin.com/
+Лицензии и исключения: https://cygwin.com/licensing.html
+Исходные тексты: https://cygwin.com/packages/summary/cygwin-src.html
+
+Исходные тексты оболочки предоставляются вместе с отдельным архивом проекта.
+Код оболочки распространяется по MIT: разрешается использовать, изменять и
+распространять с сохранением этого уведомления. Предоставляется «как есть»,
+без гарантий работоспособности у конкретного провайдера.
+
+Кнопка обновления hosts полностью заменяет системный hosts файлом V3nilla
+и сохраняет предыдущую версию рядом с ним. При установке hosts не меняется.
+Источник: https://github.com/V3nilla/IPSets-For-Bypass-in-Russia
+Интернет требуется только для обновлений и сетевых тестов.
