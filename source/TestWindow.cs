@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
@@ -12,7 +12,7 @@ using System.Windows.Forms;
 internal sealed class TestWindow : SessionForm
 {
     private readonly string folder;
-    private readonly ComboBox mode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
+    private readonly SoftChoice mode = new SoftChoice { Width = 420 };
     private readonly CheckedListBox choices = new CheckedListBox { CheckOnClick = true, Dock = DockStyle.Fill };
     private readonly TextBox output = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
     private readonly Label state = Theme.Caption("Выбери альты и начни проверку", 13, true);
@@ -27,7 +27,7 @@ internal sealed class TestWindow : SessionForm
         ClientSize = new Size(840, 760); MinimumSize = new Size(720, 650); StartPosition = FormStartPosition.CenterParent;
         TableLayoutPanel layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22), ColumnCount = 1, RowCount = 7 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        foreach (int height in new[] { 42, 56, 40, 160, 52, 62 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+        foreach (int height in new[] { 42, 56, 64, 160, 52, 62 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.Controls.Add(Theme.Caption("Проверить альты", 22, true), 0, 0);
         layout.Controls.Add(Theme.Caption("Проверка временно остановит Zapret и переберёт выбранные настройки. После завершения прежний запуск будет восстановлен. Это может занять несколько минут.", 10, false), 0, 1);

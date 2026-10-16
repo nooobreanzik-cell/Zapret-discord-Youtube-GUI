@@ -16,14 +16,15 @@ internal sealed class FeaturesWindow : SessionForm
     private readonly bool advancedMode;
     private readonly Label notice = new Label { Dock = DockStyle.Bottom, Height = 76, Padding = new Padding(18, 12, 18, 8), Text = "Выбери нужное действие. Обновления применяются только по нажатию кнопки." };
     private readonly TextBox log = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Bottom, Height = 160 };
-    private readonly ComboBox game = Choice("Выключен", "TCP и UDP", "Только TCP", "Только UDP");
+    private readonly SoftChoice game = Choice("Выключен", "TCP и UDP", "Только TCP", "Только UDP");
     private readonly TextBox tcp = new TextBox { Text = "1024-65535", Width = 320 };
     private readonly TextBox udp = new TextBox { Text = "1024-65535", Width = 320 };
-    private readonly ComboBox ipset = Choice("По списку (loaded)", "Отключён (none)", "Все адреса (any)");
+    private readonly SoftChoice ipset = Choice("По списку (loaded)", "Отключён (none)", "Все адреса (any)");
     private readonly CheckBox autoUpdate = new SoftToggle { Text = "Проверять обновления при запуске стратегии", AutoSize = true };
-    private readonly ComboBox ipSource = Choice("V3nilla", "Flowseal");
-    private readonly ComboBox fakeType = Choice("Discord UDP", "Game Filter UDP");
-    private readonly ComboBox fakeFile = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
+    private readonly SoftChoice ipSource = Choice("V3nilla", "Flowseal");
+    private readonly SoftChoice fakeType = Choice("Discord UDP", "Game Filter UDP");
+    private readonly SoftChoice fakeFile = new SoftChoice { Width = 420 };
+    private readonly TextBox geohideAddress = new TextBox { Text = ListUpdates.DefaultAddress, Width = 320 };
     private bool busy;
     private Process tool;
     private readonly System.Windows.Forms.Timer toolTimer = new System.Windows.Forms.Timer { Interval = 500 };
@@ -106,15 +107,31 @@ internal sealed class FeaturesWindow : SessionForm
         });
 
         FlowLayoutPanel updates = Page("Списки и обновления", false);
-        Label(updates, "Hosts — таблица соответствия сайтов и IP-адресов в Windows. Кнопка ниже заменяет её списком V3nilla, сохраняя предыдущую версию для восстановления.");
-        Button(updates, "Обновить hosts · V3nilla", delegate { UpdateHosts(null); });
-        Button(updates, "Скачать hosts V3nilla для ручной замены", delegate
+        Label(updates, "Hosts заменяется по кнопке или при включённой автопроверке, с резервной копией. Встроенная версия GUI содержит исправление ChatGPT от 14.10.2026. Все остальные записи берутся из снимка V3nilla.");
+        Label(updates, "Адрес стороннего сервера GeoHide для ChatGPT / OpenAI. Проверенный пользователем адрес: 193.233.112.88. Доступность может измениться. Сохранённый адрес используется и при скачивании свежего hosts.");
+        updates.Controls.Add(geohideAddress);
+        try { geohideAddress.Text = ListUpdates.LoadAddress(); }
+        catch (Exception error) { Append("Не удалось прочитать адрес GeoHide: " + error.Message); }
+        Button(updates, "Сохранить адрес GeoHide", delegate { ListUpdates.SaveAddress(geohideAddress.Text); Append("Адрес сохранён. Для изменения hosts выбери действие ниже."); });
+        Label(updates, "Поиск в issues V3nilla для всех публичных IPv4-перенаправлений в hosts. Записи 0.0.0.0 не меняются. За запуск проверяется до 25 доменов; следующий запуск продолжает обход. Замена выполняется после двух сбоев текущего адреса и успешных HTTPS-проверок нового. Ответы 403/429 считаются неоднозначными. Рабочий hosts сохраняется.");
+        CheckBox issueAuto = new SoftToggle { Text = "Проверять issues и исправлять адрес при запуске GUI", AutoSize = true, Checked = IssueRepair.Enabled };
+        issueAuto.CheckedChanged += delegate { try { IssueRepair.Enable(issueAuto.Checked); } catch (Exception error) { Append(error.Message); } };
+        updates.Controls.Add(issueAuto);
+        Button(updates, "Проверить hosts и найти замены в issues", delegate { Work(delegate { return IssueRepair.Run(); }); });
+        Button(updates, "Журнал проверки issues", delegate { log.Visible = true; notice.Visible = false; Append(IssueRepair.LastLog); });
+        Button(updates, "Добавить домены Meta / Quest на ПК", delegate { Work(delegate { return IssueRepair.MetaDomains(folder); }); });
+        Button(updates, "Скачать Meta Quest Developer Hub", delegate { Process.Start(new ProcessStartInfo("https://developers.meta.com/horizon/downloads/package/oculus-developer-hub-win/") { UseShellExecute = true }); });
+        Button(updates, "Открыть страницу Meta Quest Link", delegate { Process.Start(new ProcessStartInfo("https://www.meta.com/quest/setup/") { UseShellExecute = true }); });
+        Button(updates, "Применить hosts · версия GUI", delegate { UpdateHosts(null, 0); });
+        Button(updates, "Обновить hosts · V3nilla + настройки GUI", delegate { UpdateHosts(null, 1); });
+        Button(updates, "Исправить только ChatGPT в текущем hosts", delegate { UpdateHosts(null, 2); });
+        Button(updates, "Скачать hosts GUI для ручной замены", delegate
         {
+            string address = ReadHostsAddress();
             Work(delegate
             {
-                byte[] bytes = NetworkFiles.Download(NetworkFiles.HostsUrl, 8 * 1024 * 1024);
-                Files.ValidateHosts(bytes);
-                string path = HostsManual.Prepare(new UTF8Encoding(false).GetBytes(Files.Text(bytes)));
+                byte[] bytes = ListUpdates.BundledHosts(address);
+                string path = HostsManual.Prepare(bytes);
                 return HostsManual.Instructions(path) + HostsManual.OpenFolders(path);
             });
         });
@@ -133,6 +150,23 @@ internal sealed class FeaturesWindow : SessionForm
         Button(updates, "Проверить, не изменился ли hosts", delegate { Work(delegate { string changed = HostsGuard.Check(); return changed.Length == 0 ? "Изменение не обнаружено (контроль начинается после применения hosts через GUI)." : changed; }); });
         Button(updates, "Вернуть последний применённый hosts", delegate { Work(delegate { return HostsGuard.Restore() + " " + FlushDns(); }); });
         Label(updates, "Контроль hosts сообщает об изменениях. Причину изменения он не определяет: это может быть антивирус, другая программа или ручная правка. Восстановление выполняется только по твоей кнопке.");
+        Label(updates, "Список доменов V3nilla («Сам список.txt») заменяет list-general.txt. Он большой и может повысить расход памяти. Пользовательский list-general-user.txt не заменяется. После изменения списков перезапусти Zapret.");
+        Button(updates, "Обновить список доменов · V3nilla", delegate
+        {
+            Work(delegate { return ListUpdates.UpdateGeneral(folder, NetworkFiles.Download(ListUpdates.DomainsUrl, 16 * 1024 * 1024)); });
+        });
+        Button(updates, "Заменить список доменов из файла…", delegate
+        {
+            using (OpenFileDialog dialog = new OpenFileDialog { Filter = "Списки доменов|*.txt|Все файлы|*.*" })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                string path = dialog.FileName;
+                Work(delegate { return ListUpdates.UpdateGeneral(folder, ReadListFile(path)); });
+            }
+        });
+        Button(updates, "Добавить домены ChatGPT в пользовательский список", delegate { Work(delegate { return ListUpdates.AddChatDomains(folder); }); });
+        Button(updates, "Восстановить список доменов…", delegate { RestoreList("list-general.txt", false); });
+        Button(updates, "Восстановить пользовательский список…", delegate { RestoreList("list-general-user.txt", false); });
         Label(updates, "IP-список определяет адреса, которые обрабатывает Zapret. Источник по умолчанию — V3nilla. После обновления останови и снова включи Zapret.");
         updates.Controls.Add(ipSource); ipSource.Visible = advancedMode; ipSource.TabStop = advancedMode;
         Button(updates, "Обновить IP-список", delegate
@@ -145,6 +179,7 @@ internal sealed class FeaturesWindow : SessionForm
                 return "IP-набор обновлён (" + count + " записей). Режим loaded. Перезапусти Zapret. Копия: " + backup;
             });
         });
+        Button(updates, "Восстановить IP-список…", delegate { RestoreList("ipset-all.txt", true); });
         Button(updates, "Проверить обновления Zapret", delegate
         {
             Work(delegate
@@ -154,6 +189,18 @@ internal sealed class FeaturesWindow : SessionForm
             });
         });
         Button(updates, "Открыть официальный релиз Flowseal", delegate { Process.Start("https://github.com/Flowseal/zapret-discord-youtube/releases/latest"); });
+
+        FlowLayoutPanel localFiles = Page("Локальные файлы", false);
+        Label(localFiles, "Открывается фактически подключённая папка Zapret: " + folder);
+        Button(localFiles, "Открыть папку Zapret", delegate { ListUpdates.OpenFolder(folder); });
+        Button(localFiles, "Открыть папку списков", delegate { ListUpdates.OpenFolder(Path.Combine(folder, "lists")); });
+        Button(localFiles, "Открыть папку bin", delegate { ListUpdates.OpenFolder(Path.Combine(folder, "bin")); });
+        Button(localFiles, "Открыть папку системного hosts", delegate { ListUpdates.OpenFolder(Path.GetDirectoryName(HostsPath)); });
+        Button(localFiles, "Открыть папку настроек GUI", delegate
+        {
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ZapretSimpleGui");
+            Directory.CreateDirectory(path); ListUpdates.OpenFolder(path);
+        });
 
         FlowLayoutPanel tools = Page("Тестирование", false);
         Button(tools, "Диагностика автозапуска", delegate
@@ -191,15 +238,15 @@ internal sealed class FeaturesWindow : SessionForm
         FormClosed += delegate { toolTimer.Dispose(); if (tool != null) tool.Dispose(); };
     }
 
-    private static ComboBox Choice(params string[] options)
+    private static SoftChoice Choice(params string[] options)
     {
-        ComboBox box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 320 };
+        SoftChoice box = new SoftChoice { Width = 320 };
         box.Items.AddRange(options); box.SelectedIndex = 0; return box;
     }
     private FlowLayoutPanel Page(string name, bool advancedOnly)
     {
         Panel page = new Panel();
-        FlowLayoutPanel panel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(14) };
+        FlowLayoutPanel panel = new GlassFlowPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(14) };
         page.Controls.Add(panel); tabs.AddPage(name, page, !advancedOnly || advancedMode);
         panel.Controls.Add(Theme.Caption(name, 20, true)); return panel;
     }
@@ -305,16 +352,55 @@ internal sealed class FeaturesWindow : SessionForm
         Append("Режим IPSet сохранён. Перезапусти Zapret для применения.");
     }
     private static string HostsPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "drivers", "etc", "hosts"); } }
-    private void UpdateHosts(string local)
+    private string ReadHostsAddress()
     {
+        string address = ListUpdates.ValidateAddress(geohideAddress.Text);
+        ListUpdates.SaveAddress(address); return address;
+    }
+    private static byte[] ReadListFile(string path)
+    {
+        if (new FileInfo(path).Length > 16 * 1024 * 1024) throw new IOException("Слишком большой список.");
+        return File.ReadAllBytes(path);
+    }
+    private void RestoreList(string name, bool ipList)
+    {
+        using (OpenFileDialog dialog = new OpenFileDialog { Title = "Выбери резервную копию " + name,
+            InitialDirectory = Path.Combine(folder, "lists"), Filter = "Копии списка|" + name + ".zapretgui.*.bak|Все файлы|*.*" })
+        {
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            string path = dialog.FileName;
+            Work(delegate
+            {
+                byte[] bytes = ReadListFile(path);
+                // Empty lists and comments-only user lists are valid backups.
+                if (Files.Text(bytes).Split('\n').Any(line => line.Split('#')[0].Trim().Length > 0))
+                { if (ipList) Files.ValidateIpset(bytes); else ListUpdates.PrepareDomains(bytes); }
+                string backup = Files.Replace(Path.Combine(folder, "lists", name), bytes);
+                return "Восстановлен " + name + ". Перезапусти Zapret. Копия: " + backup;
+            });
+        }
+    }
+    private void UpdateHosts(string local, int source = 0)
+    {
+        string address = local == null ? ReadHostsAddress() : null;
         Work(delegate
         {
             if (local != null && new FileInfo(local).Length > 8 * 1024 * 1024) throw new IOException("Слишком большой hosts-файл.");
-            byte[] bytes = local == null ? NetworkFiles.Download(NetworkFiles.HostsUrl, 8 * 1024 * 1024) : File.ReadAllBytes(local);
+            string expectedHash = HostsWriter.ReadHash(HostsPath);
+            byte[] bytes;
+            if (local != null) bytes = File.ReadAllBytes(local);
+            else if (source == 0) bytes = ListUpdates.BundledHosts(address);
+            else if (source == 1)
+            {
+                byte[] downloaded = NetworkFiles.Download(NetworkFiles.HostsUrl, 8 * 1024 * 1024);
+                Files.ValidateHosts(downloaded);
+                bytes = ListUpdates.PrepareHosts(downloaded, address);
+            }
+            else bytes = ListUpdates.PrepareHosts(File.ReadAllBytes(HostsPath), address);
             int count = Files.ValidateHosts(bytes);
             byte[] applied = new UTF8Encoding(false).GetBytes(Files.Text(bytes));
             string backup;
-            try { backup = HostsWriter.Replace(HostsPath, applied, HostsWriter.ReadHash(HostsPath)); }
+            try { backup = HostsWriter.Replace(HostsPath, applied, expectedHash); }
             catch (Exception error)
             {
                 if (!(error is IOException) && !(error is UnauthorizedAccessException)) throw;

@@ -126,6 +126,7 @@ internal static class Theme
     }
     internal static void Apply(Control control)
     {
+        if (control is ListBox || control is TextBox || control is ScrollableControl) ScrollSkin.Attach(control);
         if (control is ColorChip || control is ThemePreview) return;
         control.BackColor = control is Form || (string)control.Tag == "canvas" ? Background : Panel;
         control.ForeColor = (string)control.Tag == "muted" ? Muted : Text;
@@ -167,7 +168,7 @@ internal static class Theme
             }
             control.Paint += delegate(object sender, PaintEventArgs e)
             {
-                if (SceneBackground && !(control is Card) && !(control is ThemeCanvas))
+                if (SceneBackground && !(control is Card) && !(control is ThemeCanvas) && !(control is GlassFlowPanel))
                 {
                     GlassScene.Backdrop(e.Graphics, control, control.ClientRectangle);
                     if ((string)control.Tag == "soft-panel") { if (Aero) ThemeArt.AeroEdge(e.Graphics, Rectangle.Inflate(control.ClientRectangle, -1, -1), Radius, Border); else GlassScene.Rim(e.Graphics, Rectangle.Inflate(control.ClientRectangle, -1, -1), 24); }
@@ -255,12 +256,12 @@ internal sealed class Card : Panel
 // Navigation owns pages directly: hidden advanced pages are not reachable by Tab.
 internal sealed class SettingsPages : Panel
 {
-    private readonly FlowLayoutPanel navigation = new FlowLayoutPanel { Dock = DockStyle.Left, Width = 170, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(8), AutoScroll = true };
+    private readonly FlowLayoutPanel navigation = new GlassFlowPanel { Dock = DockStyle.Left, Width = 170, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(8), AutoScroll = true };
     private readonly Panel content = new Panel { Dock = DockStyle.Fill };
     private readonly Dictionary<string, Control> pages = new Dictionary<string, Control>();
     private readonly Dictionary<string, Button> buttons = new Dictionary<string, Button>();
     private string selected;
-    internal SettingsPages() { Dock = DockStyle.Fill; Controls.Add(content); Controls.Add(navigation); }
+    internal SettingsPages() { Dock = DockStyle.Fill; Controls.Add(content); Controls.Add(navigation); ((GlassFlowPanel)navigation).FitChildrenWidth = true; }
     internal void AddPage(string name, Control page, bool accessible)
     {
         page.Dock = DockStyle.Fill; page.Visible = false; content.Controls.Add(page);
@@ -297,7 +298,7 @@ internal sealed class DarkMenuColors : ProfessionalColorTable
 
 // Preserve the standard Button click, keyboard and accessibility behavior;
 // paint a rounded surface with explicit readable disabled/focus states.
-internal sealed class SoftButton : Button
+internal class SoftButton : Button
 {
     private bool hovered, pressed;
     private PointF lightSpot = new PointF(0.35F, 0.2F);
@@ -336,9 +337,9 @@ internal sealed class SoftButton : Button
         }
         if (Theme.Liquid && Enabled && hovered)
             GlassScene.Glint(e.Graphics, new Rectangle(2, 2, Width - 5, Height - 5), Math.Min(Theme.Radius, 22), Motion.Enabled ? lightSpot : new PointF(0.35F, 0.2F));
-        TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak;
+        TextFormatFlags flags = TextFormatFlags.VerticalCenter | (this is SoftChoice ? TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis : TextFormatFlags.WordBreak);
         flags |= TextAlign == ContentAlignment.MiddleLeft ? TextFormatFlags.Left : TextFormatFlags.HorizontalCenter;
-        TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(12, 5, Math.Max(1,Width-24), Math.Max(1,Height-10)), Enabled ? ForeColor : Theme.Muted, flags);
+        TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(12, 5, Math.Max(1,Width-(this is SoftChoice ? 56 : 24)), Math.Max(1,Height-10)), Enabled ? ForeColor : Theme.Muted, flags);
     }
 }
 
@@ -655,9 +656,9 @@ internal sealed class ThemeWindow : SessionForm
     }
 }
 
-internal sealed class ThemesPage : FlowLayoutPanel
+internal sealed class ThemesPage : GlassFlowPanel
 {
-    private readonly ComboBox list = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 570 };
+    private readonly SoftChoice list = new SoftChoice { Width = 570 };
     private readonly ThemePreview preview = new ThemePreview { Width = 570, Height = 220 };
     private readonly Label hint = Theme.Caption("", 10, false);
     private readonly Button edit, remove;
@@ -667,11 +668,11 @@ internal sealed class ThemesPage : FlowLayoutPanel
         Controls.Add(Theme.Caption("Темы", 23, true));
         Controls.Add(Theme.Caption("Выбери оформление или создай свою тему. Солнце и луна переключают светлый и тёмный варианты выбранной темы.", 10, false));
         Controls.Add(list); Controls.Add(preview);
-        FlowLayoutPanel actions = new FlowLayoutPanel { Width = 590, Height = 54, WrapContents = false };
+        FlowLayoutPanel actions = new GlassFlowPanel { Width = 590, Height = 54, WrapContents = false };
         AddButton(actions, "Применить", delegate { ThemeSpec spec = Selected; if (spec != null) { Theme.Use(spec, Theme.Light); hint.Text = "Применена тема: " + spec.Name; } });
         AddButton(actions, "Создать свою", delegate { Edit(true); });
         edit = AddButton(actions, "Изменить", delegate { Edit(false); }); Controls.Add(actions);
-        FlowLayoutPanel files = new FlowLayoutPanel { Width = 590, Height = 54, WrapContents = false };
+        FlowLayoutPanel files = new GlassFlowPanel { Width = 590, Height = 54, WrapContents = false };
         AddButton(files, "Импорт", Import);
         AddButton(files, "Экспорт", delegate
         {
@@ -713,7 +714,7 @@ internal sealed class ThemesPage : FlowLayoutPanel
     {
         list.Items.Clear(); foreach (ThemeSpec spec in ThemeStore.All()) list.Items.Add(spec);
         int index = 0; for (int i = 0; i < list.Items.Count; i++) if (((ThemeSpec)list.Items[i]).Id == id) index = i;
-        list.SelectedIndex = index; hint.Text = ThemeStore.LoadWarning;
+        list.SelectedIndex = index; ShowPreview(); hint.Text = ThemeStore.LoadWarning;
     }
     private void ShowPreview()
     {
@@ -760,7 +761,13 @@ internal sealed class ThemePreview : Control
     internal bool LightMode;
     private byte[] wallpaperData, logoData;
     private Bitmap wallpaper, logo;
-    internal ThemePreview() { DoubleBuffered = true; SetStyle(ControlStyles.ResizeRedraw, true); }
+    internal ThemePreview()
+    {
+        DoubleBuffered = true; SetStyle(ControlStyles.ResizeRedraw, true);
+        Margin = new Padding(3, 0, 3, 12);
+        SizeChanged += delegate { Theme.Clip(this, 20); };
+        HandleCreated += delegate { Theme.Clip(this, 20); };
+    }
     protected override void OnPaint(PaintEventArgs e)
     {
         if (Spec == null) { e.Graphics.Clear(Theme.Panel); return; }
@@ -796,8 +803,8 @@ internal sealed class ThemeEditor : SessionForm
 {
     internal ThemeSpec Result;
     private readonly TextBox name = new TextBox { Width = 380, MaxLength = 48 };
-    private readonly ComboBox mode = new ComboBox { Width = 280, DropDownStyle = ComboBoxStyle.DropDownList };
-    private readonly ComboBox finish = new ComboBox { Width = 280, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly SoftChoice mode = new SoftChoice { Width = 280 };
+    private readonly SoftChoice finish = new SoftChoice { Width = 280 };
     private readonly NumericUpDown round = new NumericUpDown { Minimum = 8, Maximum = 32, Width = 110 };
     private readonly ThemePreview preview = new ThemePreview { Width = 480, Height = 220 };
     private readonly Label contrast = Theme.Caption("", 10, false);
@@ -807,7 +814,7 @@ internal sealed class ThemeEditor : SessionForm
         Result = basis.Copy(); if (copy) { Result.Id = ""; Result.BuiltIn = false; Result.Name = "Моя тема"; }
         Text = copy ? "Создать тему" : "Изменить тему"; Font = new Font("Segoe UI", 10F); AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(760, 790); MinimumSize = new Size(720, 660); StartPosition = FormStartPosition.CenterParent;
-        FlowLayoutPanel content = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(22) };
+        FlowLayoutPanel content = new GlassFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(22) };
         content.Controls.Add(Theme.Caption("Своя тема", 22, true));
         name.Text = Result.Name; AddRow(content, "Название", name);
         finish.Items.AddRange(new object[] { "Матовая", "Liquid Glass", "Frutiger Aero" }); finish.SelectedIndex = Array.IndexOf(new[] { "flat", "glass", "aero" }, Result.Finish); AddRow(content, "Поверхность", finish);
@@ -831,7 +838,7 @@ internal sealed class ThemeEditor : SessionForm
         }
         AddArtworkControls(content);
         content.Controls.Add(colors); content.Controls.Add(preview); contrast.MaximumSize = new Size(645, 0); content.Controls.Add(contrast);
-        FlowLayoutPanel actions = new FlowLayoutPanel { Width = 640, Height = 50 };
+        FlowLayoutPanel actions = new GlassFlowPanel { Width = 640, Height = 50 };
         Button save = new SoftButton { Text = "Сохранить тему", AutoSize = true }; Button cancel = new SoftButton { Text = "Отмена", AutoSize = true, DialogResult = DialogResult.Cancel };
         actions.Controls.Add(save); actions.Controls.Add(cancel); actions.Dock = DockStyle.Bottom; actions.Height = 58; actions.Padding = new Padding(22, 4, 0, 0); Controls.Add(content); Controls.Add(actions); CancelButton = cancel; AcceptButton = save;
         finish.SelectedIndexChanged += delegate { Result.Finish = new[] { "flat", "glass", "aero" }[finish.SelectedIndex]; RefreshPreview(); };
@@ -852,7 +859,7 @@ internal sealed class ThemeEditor : SessionForm
     }
     private void AddArtworkControls(Control content)
     {
-        FlowLayoutPanel pictures = new FlowLayoutPanel { Width = 650, Height = 100, WrapContents = true };
+        FlowLayoutPanel pictures = new GlassFlowPanel { Width = 650, Height = 100, WrapContents = true };
         Action<string, bool, bool> add = delegate(string title, bool logo, bool clear)
         {
             Button button = new SoftButton { Text = title, Width = 295, Height = 42 };
@@ -873,7 +880,7 @@ internal sealed class ThemeEditor : SessionForm
         add("Выбрать фон…", false, false); add("Стандартный фон", false, true);
         add("Выбрать значок…", true, false); add("Стандартный значок", true, true);
         content.Controls.Add(pictures);
-        ComboBox fit = new ComboBox { Width = 280, DropDownStyle = ComboBoxStyle.DropDownList };
+        SoftChoice fit = new SoftChoice { Width = 280 };
         fit.Items.AddRange(new object[] { "Заполнить с обрезкой", "Вписать целиком", "Растянуть" });
         fit.SelectedIndex = Array.IndexOf(new[] { "cover", "contain", "stretch" }, Result.ImageFit);
         fit.SelectedIndexChanged += delegate { Result.ImageFit = new[] { "cover", "contain", "stretch" }[fit.SelectedIndex]; RefreshPreview(); };
@@ -885,7 +892,7 @@ internal sealed class ThemeEditor : SessionForm
     }
     private static void AddRow(Control parent, string title, Control input)
     {
-        FlowLayoutPanel row = new FlowLayoutPanel { Width = 650, Height = 38, WrapContents = false };
+        FlowLayoutPanel row = new GlassFlowPanel { Width = 650, Height = Math.Max(42, input.Height + input.Margin.Vertical + 4), WrapContents = false };
         Label label = Theme.Caption(title, 10, false); label.AutoSize = false; label.Width = 180; label.Margin = new Padding(0, 6, 0, 0);
         row.Controls.Add(label); row.Controls.Add(input); parent.Controls.Add(row);
     }
@@ -1001,6 +1008,7 @@ internal static class GlassScene
         try
         {
             g.SetClip(bounds, CombineMode.Intersect);
+            using (Brush clear = new SolidBrush(Theme.Background)) g.FillRectangle(clear, bounds);
             Bitmap scene = Scene(form);
             Rectangle source = new Rectangle(origin.X + bounds.X, origin.Y + bounds.Y, bounds.Width, bounds.Height);
             source.Intersect(new Rectangle(Point.Empty, scene.Size));
@@ -1013,6 +1021,8 @@ internal static class GlassScene
             {
                 Point anchor = Origin(layer);
                 Rectangle surface = new Rectangle(anchor.X - origin.X, anchor.Y - origin.Y, Math.Max(2, layer.Width), Math.Max(2, layer.Height));
+                using (GraphicsPath surfaceClip = Theme.Round(new Rectangle(surface.X + 2, surface.Y + 2, Math.Max(1, surface.Width - 5), Math.Max(1, surface.Height - 5)), Theme.Aero ? 3 : Theme.Radius))
+                    g.SetClip(surfaceClip, CombineMode.Intersect);
                 using (Brush veil = new SolidBrush(Color.FromArgb((Theme.Liquid ? (int)(120 + 38 * Theme.Lightness) : Theme.Aero ? (Theme.Light ? 242 : 237) : 255), Theme.Panel))) g.FillRectangle(veil, bounds);
                 using (LinearGradientBrush sheen = new LinearGradientBrush(surface, Color.FromArgb((Theme.Liquid ? (int)(12 + 10 * Theme.Lightness) : Theme.Aero ? 12 : 0), Color.White), Color.FromArgb(0, Color.White), 125F)) g.FillRectangle(sheen, bounds);
             }
@@ -1151,12 +1161,76 @@ internal static class ThemeArtwork
     }
 }
 
-internal sealed class GlassListBox : ListBox
+internal sealed class GlassListBox : Control
 {
+    internal bool SelectionLocked;
+    internal bool IntegralHeight { get; set; }
+    internal DrawMode DrawMode { get; set; }
+    internal readonly System.Collections.ArrayList Items = new System.Collections.ArrayList();
+    internal event DrawItemEventHandler DrawItem;
+    internal event EventHandler SelectedIndexChanged;
+    private int selected = -1, itemHeight = 58, updating;
+    private double offset, target;
+    private readonly AnimationFrame frame = new AnimationFrame();
+    private readonly Stopwatch watch = new Stopwatch();
+    private double lastTime;
+    private bool dragging;
+    private int grab;
+    internal int ItemHeight { get { return itemHeight; } set { itemHeight = Math.Max(1, value); Clamp(); Invalidate(); } }
+    internal int SelectedIndex
+    {
+        get { return selected; }
+        set
+        {
+            int next = value >= 0 && value < Items.Count ? value : -1;
+            bool changed = selected != next; selected = next;
+            if (selected >= 0)
+            {
+                double top = selected * ItemHeight;
+                if (top < offset) MoveTo(top, false);
+                else if (top + ItemHeight > offset + ClientSize.Height) MoveTo(top + ItemHeight - ClientSize.Height, false);
+            }
+            Invalidate(); if (changed && SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
+        }
+    }
+    internal object SelectedItem { get { return selected >= 0 && selected < Items.Count ? Items[selected] : null; } }
+    internal void BeginUpdate() { updating++; }
+    internal void EndUpdate() { updating = Math.Max(0, updating - 1); Clamp(); Invalidate(); }
+    private double Maximum { get { return Math.Max(0, Items.Count * (double)ItemHeight - ClientSize.Height); } }
+    private int RailWidth { get { return Math.Max(14, Font.Height); } }
     internal GlassListBox()
     {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-            ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+            ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+        TabStop = true; AccessibleRole = AccessibleRole.List;
+        frame.Tick += Tick;
+    }
+    private void Clamp()
+    {
+        offset = Math.Max(0, Math.Min(Maximum, offset)); target = Math.Max(0, Math.Min(Maximum, target));
+        if (selected >= Items.Count) selected = -1;
+    }
+    private void MoveTo(double value, bool animate)
+    {
+        target = Math.Max(0, Math.Min(Maximum, value));
+        if (!animate || !Motion.Enabled)
+        { offset = target; frame.Stop(); Invalidate(); return; }
+        if (!frame.Enabled) { watch.Restart(); lastTime = 0; frame.Start(); }
+    }
+    private void Tick()
+    {
+        Clamp(); double now = watch.Elapsed.TotalSeconds;
+        double dt = Math.Max(0, Math.Min(0.05, now - lastTime)); lastTime = now;
+        offset += (target - offset) * (1 - Math.Exp(-dt / 0.065));
+        if (!Motion.Enabled || Math.Abs(target - offset) < 0.25) { offset = target; frame.Stop(); }
+        Invalidate();
+    }
+    private Rectangle Thumb()
+    {
+        int track = Math.Max(1, ClientSize.Height - 8);
+        int height = Math.Min(track, Math.Max(28, (int)(track * ClientSize.Height / Math.Max(1.0, Items.Count * (double)ItemHeight))));
+        int y = 4 + (int)((track - height) * offset / Math.Max(1, Maximum));
+        return new Rectangle(ClientSize.Width - RailWidth, y, RailWidth, height);
     }
     protected override void OnPaintBackground(PaintEventArgs e)
     {
@@ -1165,28 +1239,138 @@ internal sealed class GlassListBox : ListBox
     }
     protected override void OnPaint(PaintEventArgs e)
     {
-        // Paint the entire visible list in one buffer. Native selection,
-        // keyboard navigation and scrolling still belong to ListBox.
-        for (int i = Math.Max(0, TopIndex); i < Items.Count; i++)
+        if (updating > 0) return;
+        Clamp(); int contentWidth = Math.Max(1, ClientSize.Width - (Maximum > 0 ? RailWidth + 3 : 0));
+        GraphicsState saved = e.Graphics.Save();
+        e.Graphics.SetClip(new Rectangle(0, 0, contentWidth, ClientSize.Height), CombineMode.Intersect);
+        int first = Math.Max(0, (int)(offset / ItemHeight));
+        for (int i = first; i < Items.Count; i++)
         {
-            Rectangle row = GetItemRectangle(i);
-            if (row.Top >= ClientSize.Height) break;
-            if (!row.IntersectsWith(e.ClipRectangle)) continue;
-            DrawItemState state = i == SelectedIndex ? DrawItemState.Selected : DrawItemState.None;
-            if (i == SelectedIndex && Focused) state |= DrawItemState.Focus;
+            int y = (int)Math.Round(i * (double)ItemHeight - offset);
+            if (y >= ClientSize.Height) break;
+            Rectangle row = new Rectangle(0, y, contentWidth, ItemHeight);
+            DrawItemState state = i == selected ? DrawItemState.Selected : DrawItemState.None;
+            if (i == selected && Focused) state |= DrawItemState.Focus;
             if (!Enabled) state |= DrawItemState.Disabled;
-            OnDrawItem(new DrawItemEventArgs(e.Graphics, Font, row, i, state, ForeColor, BackColor));
+            if (DrawItem != null) DrawItem(this, new DrawItemEventArgs(e.Graphics, Font, row, i, state, ForeColor, BackColor));
+        }
+        e.Graphics.Restore(saved);
+        if (Maximum > 0)
+        {
+            Rectangle thumb = Thumb();
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (Pen pen = new Pen(Motion.Blend(BackColor, Theme.Muted, dragging ? 0.9 : 0.6), Math.Max(4, RailWidth / 3)))
+            {
+                pen.StartCap = pen.EndCap = LineCap.Round;
+                float x = thumb.Left + thumb.Width / 2F;
+                e.Graphics.DrawLine(pen, x, thumb.Top + 3, x, thumb.Bottom - 3);
+            }
         }
     }
-    protected override void OnSelectedIndexChanged(EventArgs e) { base.OnSelectedIndexChanged(e); Invalidate(); }
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+        int lines = SystemInformation.MouseWheelScrollLines;
+        if (lines == 0) return;
+        double step = lines < 0 ? ClientSize.Height : Math.Max(1, lines) * ItemHeight;
+        MoveTo(target - e.Delta / 120.0 * step, true);
+    }
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e); if (e.Button != MouseButtons.Left) return; Focus();
+        if (Maximum > 0 && e.X >= ClientSize.Width - RailWidth)
+        {
+            Rectangle thumb = Thumb();
+            if (thumb.Contains(e.Location)) { dragging = true; grab = e.Y - thumb.Top; Capture = true; frame.Stop(); }
+            else MoveTo(target + (e.Y < thumb.Top ? -ClientSize.Height : ClientSize.Height), true);
+            return;
+        }
+        if (!SelectionLocked)
+        {
+            int index = (int)((offset + e.Y) / ItemHeight);
+            if (index >= 0 && index < Items.Count) SelectedIndex = index;
+        }
+    }
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e); if (!dragging) return;
+        Rectangle thumb = Thumb(); double travel = Math.Max(1, ClientSize.Height - 8 - thumb.Height);
+        MoveTo((e.Y - grab - 4) / travel * Maximum, false);
+    }
+    protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); dragging = false; Capture = false; Invalidate(); }
+    protected override void OnMouseCaptureChanged(EventArgs e) { base.OnMouseCaptureChanged(e); if (!Capture) dragging = false; }
+    protected override bool IsInputKey(Keys keyData)
+    {
+        Keys key = keyData & Keys.KeyCode;
+        return key == Keys.Up || key == Keys.Down || key == Keys.PageUp || key == Keys.PageDown || key == Keys.Home || key == Keys.End || base.IsInputKey(keyData);
+    }
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        int page = Math.Max(1, ClientSize.Height / ItemHeight), next = selected;
+        double destination = target;
+        if (e.KeyCode == Keys.Down) { next++; destination += ItemHeight; }
+        else if (e.KeyCode == Keys.Up) { next--; destination -= ItemHeight; }
+        else if (e.KeyCode == Keys.PageDown) { next += page; destination += ClientSize.Height; }
+        else if (e.KeyCode == Keys.PageUp) { next -= page; destination -= ClientSize.Height; }
+        else if (e.KeyCode == Keys.Home) { next = 0; destination = 0; }
+        else if (e.KeyCode == Keys.End) { next = Items.Count - 1; destination = Maximum; }
+        else return;
+        if (SelectionLocked) MoveTo(destination, true);
+        else if (Items.Count > 0)
+        {
+            next = Math.Max(0, Math.Min(Items.Count - 1, next));
+            bool changed = next != selected; selected = next;
+            if (selected * ItemHeight < target) MoveTo(selected * ItemHeight, true);
+            else if ((selected + 1) * ItemHeight > target + ClientSize.Height) MoveTo((selected + 1) * ItemHeight - ClientSize.Height, true);
+            if (changed && SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
+            Invalidate();
+        }
+        e.Handled = e.SuppressKeyPress = true;
+    }
+    protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); Clamp(); Invalidate(); }
     protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
     protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+    protected override void OnVisibleChanged(EventArgs e) { base.OnVisibleChanged(e); if (!Visible) { frame.Stop(); offset = target; } }
+    protected override void Dispose(bool disposing) { if (disposing) frame.Dispose(); base.Dispose(disposing); }
+}
+
+// Scrollable glass backgrounds are fixed to the window, not copied with content.
+internal class GlassFlowPanel : FlowLayoutPanel
+{
+    internal bool FitChildrenWidth;
+    private bool fitting;
+    internal GlassFlowPanel() { DoubleBuffered = true; SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true); }
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        if (Theme.SceneBackground) GlassScene.Backdrop(e.Graphics, this, ClientRectangle);
+        else base.OnPaintBackground(e);
+    }
+    protected override void OnScroll(ScrollEventArgs e)
+    { base.OnScroll(e); if (Theme.SceneBackground) Invalidate(true); }
+    protected override void OnLayout(LayoutEventArgs e)
+    {
+        if (FitChildrenWidth && !fitting)
+        {
+            fitting = true;
+            try
+            {
+                // Reserve a vertical rail even before it appears, avoiding width/scrollbar oscillation.
+                int available = Math.Max(1, Width - Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - 6);
+                foreach (Control child in Controls)
+                {
+                    int width = Math.Max(1, available - child.Margin.Horizontal);
+                    if (child.Width != width) child.Width = width;
+                }
+            }
+            finally { fitting = false; }
+        }
+        base.OnLayout(e); if (Theme.SceneBackground) Invalidate(true);
+    }
     protected override void WndProc(ref Message m)
     {
         base.WndProc(ref m);
-        // Native list scrolling reuses old pixels, but a glass backdrop is fixed
-        // in form coordinates and must be repainted at the new scroll position.
-        if (Theme.SceneBackground && (m.Msg == 0x0115 || m.Msg == 0x020A || m.Msg == 0x0005)) Invalidate();
+        if (Theme.SceneBackground && (m.Msg == 0x115 || m.Msg == 0x20A)) Invalidate(true);
     }
 }
 
@@ -1301,3 +1485,221 @@ internal sealed class ThemeFade : Control
 
 // A silent, embedded frame loop. No external player, codec, network request or
 // per-frame file access. Decode one frame shared by all visible windows.
+
+// Repaint the native non-client scrollbar only; Windows retains hit testing,
+// dragging, keyboard accessibility and the system's scroll range.
+internal sealed class ScrollSkin : NativeWindow
+{
+    private readonly Control owner;
+    private bool drawing;
+    private static readonly Dictionary<Control, ScrollSkin> skins = new Dictionary<Control, ScrollSkin>();
+    internal static void Attach(Control control)
+    {
+        if (skins.ContainsKey(control)) return;
+        ScrollSkin skin = new ScrollSkin(control); skins.Add(control, skin);
+    }
+    private ScrollSkin(Control control)
+    {
+        owner = control;
+        owner.HandleCreated += Created; owner.HandleDestroyed += Destroyed;
+        owner.Disposed += Disposed; owner.BackColorChanged += ColorChanged;
+        if (owner.IsHandleCreated) AssignHandle(owner.Handle);
+    }
+    private void Created(object sender, EventArgs e) { AssignHandle(owner.Handle); }
+    private void Destroyed(object sender, EventArgs e) { if (Handle != IntPtr.Zero) ReleaseHandle(); }
+    private void ColorChanged(object sender, EventArgs e)
+    { if (owner.IsHandleCreated) RedrawWindow(owner.Handle, IntPtr.Zero, IntPtr.Zero, 0x401); }
+    private void Disposed(object sender, EventArgs e)
+    {
+        owner.HandleCreated -= Created; owner.HandleDestroyed -= Destroyed;
+        owner.Disposed -= Disposed; owner.BackColorChanged -= ColorChanged;
+        Destroyed(sender, e); skins.Remove(owner);
+    }
+    protected override void WndProc(ref Message m)
+    {
+        base.WndProc(ref m);
+        if (m.Msg == 0x85 || m.Msg == 0xF || m.Msg == 0x115 || m.Msg == 0x20A || m.Msg == 5 || m.Msg == 0xA0 || m.Msg == 0xA1 || m.Msg == 0xA2)
+            PaintBar();
+    }
+    private void PaintBar()
+    {
+        if (drawing || Handle == IntPtr.Zero || owner.IsDisposed || owner.RightToLeft == RightToLeft.Yes) return;
+        if ((GetWindowLong(Handle, -16) & 0x200000) == 0) return;
+        SCROLLINFO info = new SCROLLINFO(); info.cbSize = Marshal.SizeOf(typeof(SCROLLINFO)); info.fMask = 0x17;
+        if (!GetScrollInfo(Handle, 1, ref info)) return;
+        RECT window; if (!GetWindowRect(Handle, out window)) return;
+        Point origin = owner.PointToScreen(Point.Empty);
+        int left = origin.X - window.Left + owner.ClientSize.Width;
+        int top = origin.Y - window.Top, height = owner.ClientSize.Height;
+        int width = window.Right - window.Left - left;
+        if (width < 4 || width > SystemInformation.VerticalScrollBarWidth + 8 || height < 4) return;
+        drawing = true; IntPtr dc = GetWindowDC(Handle);
+        try
+        {
+            if (dc == IntPtr.Zero) return;
+            using (Graphics g = Graphics.FromHdc(dc))
+            {
+                Color background = owner.BackColor.A == 255 ? owner.BackColor : Theme.Panel;
+                if (Theme.SceneBackground)
+                {
+                    GraphicsState saved = g.Save();
+                    int clientX = origin.X - window.Left;
+                    g.TranslateTransform(clientX, top);
+                    GlassScene.Backdrop(g, owner, new Rectangle(left - clientX, 0, width, height));
+                    g.Restore(saved);
+                }
+                else using (Brush track = new SolidBrush(background)) g.FillRectangle(track, left, top, width, height);
+                int arrow = Math.Min(SystemInformation.VerticalScrollBarArrowHeight, height / 2);
+                int trackHeight = height - arrow * 2;
+                long range = (long)info.nMax - info.nMin + 1;
+                if (trackHeight <= 0 || range <= info.nPage || range <= 0) return;
+                int thumb = Math.Min(trackHeight, Math.Max(12, (int)(trackHeight * (double)info.nPage / range)));
+                int position = info.nPos;
+                int travel = trackHeight - thumb;
+                int y = top + arrow + (int)(travel * Math.Max(0, Math.Min(range - info.nPage, (long)position - info.nMin)) / Math.Max(1.0, range - info.nPage));
+                int stroke = Math.Max(4, width / 3), x = left + (width - stroke) / 2;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (Pen pen = new Pen(Motion.Blend(background, Theme.Muted, 0.55), stroke))
+                { pen.StartCap = pen.EndCap = LineCap.Round; g.DrawLine(pen, x + stroke / 2, y + stroke / 2, x + stroke / 2, y + Math.Max(stroke / 2 + 1, thumb - stroke / 2)); }
+                using (Pen pen = new Pen(Motion.Blend(background, Theme.Muted, 0.4), 1))
+                {
+                    int cx = left + width / 2;
+                    g.DrawLines(pen, new Point[] { new Point(cx - 3, top + arrow / 2 + 1), new Point(cx, top + arrow / 2 - 2), new Point(cx + 3, top + arrow / 2 + 1) });
+                    g.DrawLines(pen, new Point[] { new Point(cx - 3, top + height - arrow / 2 - 2), new Point(cx, top + height - arrow / 2 + 1), new Point(cx + 3, top + height - arrow / 2 - 2) });
+                }
+            }
+        }
+        finally { if (dc != IntPtr.Zero) ReleaseDC(Handle, dc); drawing = false; }
+    }
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { internal int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct SCROLLINFO { internal int cbSize, fMask, nMin, nMax; internal uint nPage; internal int nPos, nTrackPos; }
+    [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr h, int index);
+    [DllImport("user32.dll")] private static extern bool GetScrollInfo(IntPtr h, int bar, ref SCROLLINFO info);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, out RECT rect);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindowDC(IntPtr h);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr h, IntPtr dc);
+    [DllImport("user32.dll")] private static extern bool RedrawWindow(IntPtr h, IntPtr rect, IntPtr region, uint flags);
+}
+
+internal sealed class SoftChoice : SoftButton
+{
+    internal readonly System.Collections.ArrayList Items = new System.Collections.ArrayList();
+    internal event EventHandler SelectedIndexChanged;
+    private int index = -1;
+    private ContextMenuStrip popup;
+    internal int SelectedIndex
+    {
+        get { return index; }
+        set
+        {
+            int next = value >= 0 && value < Items.Count ? value : -1;
+            bool changed = next != index; index = next;
+            Text = SelectedItem == null ? "Выбери вариант" : SelectedItem.ToString();
+            AccessibleDescription = "Открой список клавишей Enter, пробелом или стрелкой вниз.";
+            Invalidate();
+            if (changed && SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
+        }
+    }
+    internal object SelectedItem { get { return index >= 0 && index < Items.Count ? Items[index] : null; } }
+    internal SoftChoice()
+    {
+        Height = 46; MinimumSize = new Size(140, 46); AutoSize = false;
+        TextAlign = ContentAlignment.MiddleLeft; AccessibleName = "Выбор варианта";
+        Margin = new Padding(3, 4, 3, 12);
+    }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using (Pen pen = new Pen(Enabled ? Theme.Muted : Theme.Border, 1.8F))
+        {
+            pen.StartCap = pen.EndCap = LineCap.Round;
+            int x = Width - 24, y = Height / 2;
+            e.Graphics.DrawLines(pen, new Point[] { new Point(x - 4, y - 2), new Point(x, y + 2), new Point(x + 4, y - 2) });
+        }
+    }
+    protected override void OnClick(EventArgs e)
+    {
+        base.OnClick(e); if (Items.Count == 0) return;
+        if (popup != null) { popup.Dispose(); popup = null; }
+        popup = new ContextMenuStrip { AutoSize = true, ShowImageMargin = false, ShowCheckMargin = true,
+            BackColor = Theme.Panel, ForeColor = Theme.Text, Font = Font, Padding = new Padding(6), Renderer = new ThemeMenuRenderer() };
+        int menuWidth = Math.Min(Width, Screen.FromControl(this).WorkingArea.Width - 24);
+        for (int i = 0; i < Items.Count; i++)
+        {
+            int selected = i;
+            ToolStripMenuItem item = new ToolStripMenuItem(Items[i].ToString()) { AutoSize = false,
+                Size = new Size(Math.Max(120, menuWidth - 12), 40), Checked = i == index,
+                ForeColor = Theme.Text, BackColor = Theme.Panel };
+            item.Click += delegate { SelectedIndex = selected; };
+            popup.Items.Add(item);
+        }
+        popup.Opened += delegate { Theme.Clip(popup, 16); if (index >= 0 && index < popup.Items.Count) popup.Items[index].Select(); };
+        popup.SizeChanged += delegate { Theme.Clip(popup, 16); };
+        popup.Show(this, new Point(0, Height + 5));
+    }
+    protected override bool IsInputKey(Keys keyData)
+    { Keys key = keyData & Keys.KeyCode; return key == Keys.Down || key == Keys.Up || key == Keys.F4 || base.IsInputKey(keyData); }
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Down || e.KeyCode == Keys.Up || e.KeyCode == Keys.F4)
+        { OnClick(EventArgs.Empty); e.Handled = e.SuppressKeyPress = true; return; }
+        base.OnKeyDown(e);
+    }
+    protected override void Dispose(bool disposing)
+    { if (disposing && popup != null) popup.Dispose(); base.Dispose(disposing); }
+}
+
+internal sealed class ThemeMenuRenderer : ToolStripProfessionalRenderer
+{
+    internal ThemeMenuRenderer() { RoundedEdges = true; }
+    protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+    { using (Brush brush = new SolidBrush(Theme.Panel)) e.Graphics.FillRectangle(brush, e.AffectedBounds); }
+    protected override void OnRenderImageMargin(ToolStripRenderEventArgs e) { }
+    protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+    {
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using (GraphicsPath path = Theme.Round(new Rectangle(0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1), 16))
+        using (Pen pen = new Pen(Theme.Border)) e.Graphics.DrawPath(pen, path);
+    }
+    protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+    {
+        if (!e.Item.Selected) return;
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using (GraphicsPath path = Theme.Round(new Rectangle(1, 1, e.Item.Width - 3, e.Item.Height - 3), 11))
+        using (Brush brush = new SolidBrush(Theme.Selected)) e.Graphics.FillPath(brush, path);
+    }
+    protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+    { e.TextColor = e.Item.Selected ? Theme.Accent : Theme.Text; base.OnRenderItemText(e); }
+    protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+    {
+        Rectangle r = e.ImageRectangle; e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using (Pen pen = new Pen(Theme.Accent, 2))
+            e.Graphics.DrawLines(pen, new Point[] { new Point(r.Left + 2, r.Top + r.Height / 2), new Point(r.Left + r.Width / 2 - 1, r.Bottom - 3), new Point(r.Right - 2, r.Top + 3) });
+    }
+}
+
+internal sealed class ThemedToolTip : ToolTip
+{
+    internal ThemedToolTip()
+    {
+        OwnerDraw = true; UseAnimation = false; UseFading = false;
+        Popup += delegate(object sender, PopupEventArgs e)
+        {
+            Font font = e.AssociatedControl == null ? SystemFonts.MessageBoxFont : e.AssociatedControl.Font;
+            string text = e.AssociatedControl == null ? "" : GetToolTip(e.AssociatedControl);
+            Size size = TextRenderer.MeasureText(text, font, new Size(420, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            e.ToolTipSize = new Size(size.Width + 24, size.Height + 18);
+        };
+        Draw += delegate(object sender, DrawToolTipEventArgs e)
+        {
+            e.Graphics.Clear(Theme.Panel);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath path = Theme.Round(new Rectangle(0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1), 9))
+            using (Pen pen = new Pen(Theme.Border)) e.Graphics.DrawPath(pen, path);
+            Font font = e.AssociatedControl == null ? SystemFonts.MessageBoxFont : e.AssociatedControl.Font;
+            TextRenderer.DrawText(e.Graphics, e.ToolTipText, font, Rectangle.Inflate(e.Bounds, -12, -9), Theme.Text,
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter);
+        };
+    }
+}

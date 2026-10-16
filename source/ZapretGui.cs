@@ -18,8 +18,8 @@ using System.Security.Principal;
 using System.Reflection;
 using Microsoft.Win32;
 
-[assembly: AssemblyVersion("0.9.11.0")]
-[assembly: AssemblyFileVersion("0.9.11.0")]
+[assembly: AssemblyVersion("0.9.14.0")]
+[assembly: AssemblyFileVersion("0.9.14.0")]
 
 internal static class Program
 {
@@ -51,7 +51,17 @@ internal static class Program
                 MessageBox.Show("Оболочка уже открыта. Открой её через значок в трее рядом с часами.", "Zapret GUI");
                 return;
             }
-            try { Application.Run(new MainWindow()); }
+            try
+            {
+                using (StartupOverlay loading = new StartupOverlay())
+                {
+                    MainWindow main = new MainWindow();
+                    EventHandler finishLoading = null;
+                    finishLoading = delegate { main.Shown -= finishLoading; loading.Dispose(); };
+                    main.Shown += finishLoading;
+                    Application.Run(main);
+                }
+            }
             catch (Exception error) { MessageBox.Show(error.Message, "Не удалось открыть Zapret GUI", MessageBoxButtons.OK, MessageBoxIcon.Error); }
             finally { mutex.ReleaseMutex(); }
         }
@@ -72,7 +82,7 @@ internal sealed class Strategy
 internal sealed class MainWindow : SessionForm
 {
     private readonly TextBox folderBox = new TextBox { ReadOnly = true, Dock = DockStyle.Fill };
-    private readonly ListBox strategies = new GlassListBox { Dock = DockStyle.Fill, IntegralHeight = false };
+    private readonly GlassListBox strategies = new GlassListBox { Dock = DockStyle.Fill, IntegralHeight = false };
     private readonly Label status = new Label { AutoSize = true, Text = "Выбери папку Zapret." };
     private readonly Button browse = new SoftButton { Text = "Выбрать папку…", AutoSize = true };
     private readonly Button refresh = new SoftButton { Text = "Обновить список", AutoSize = true };
@@ -102,7 +112,7 @@ internal sealed class MainWindow : SessionForm
     private readonly Button advancedSettings = new SoftButton { Text = "Технические настройки", Width = 184, Height = 56 };
     private readonly Panel technical = new Panel { Dock = DockStyle.Fill, Height = 164, MinimumSize = new Size(0, 164) };
     private readonly Label recommendationHint = Theme.Caption("Альт — набор настроек обхода блокировок. Если доступ не появился, попробуй другой или запусти тестирование.", 10, false);
-    private readonly ToolTip hints = new ToolTip { AutoPopDelay = 15000, InitialDelay = 500 };
+    private readonly ToolTip hints = new ThemedToolTip { AutoPopDelay = 15000, InitialDelay = 500 };
 
     public MainWindow()
     {
@@ -193,7 +203,7 @@ internal sealed class MainWindow : SessionForm
                 return enabled ? "Автозапуск службы настроен. " + (ZapretService.Read(root).Running ? "Zapret сейчас работает." : "Сейчас служба остановлена: нажми «Включить Zapret». Если запуск не удаётся, открой диагностику автозапуска.") : "Автозагрузка отключена. Текущий запуск продолжает работать.";
             });
         };
-        Shown += delegate { RestoreSettings(); Poll(); timer.Start(); };
+        Shown += delegate { RestoreSettings(); Poll(); timer.Start(); IssueRepair.StartAutomatic(); };
         ApplyMode();
         UpdateButtons();
     }
@@ -206,14 +216,14 @@ internal sealed class MainWindow : SessionForm
         sidebar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         sidebar.RowStyles.Add(new RowStyle(SizeType.Absolute, 200)); sidebar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         sidebar.RowStyles.Add(new RowStyle(SizeType.Absolute, 142)); sidebar.RowStyles.Add(new RowStyle(SizeType.Absolute, 114));
-        FlowLayoutPanel brand = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        FlowLayoutPanel brand = new GlassFlowPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         PictureBox logo = new PictureBox { Image = Brand.CreateImage(96), Size = new Size(80, 80), SizeMode = PictureBoxSizeMode.Zoom };
         logo.Disposed += delegate { logo.Image.Dispose(); };
         Action updateLogo = delegate { Image old = logo.Image; logo.Image = Brand.CreateImage(96); if (old != null) old.Dispose(); };
         Theme.Changed += updateLogo; logo.Disposed += delegate { Theme.Changed -= updateLogo; };
         brand.Controls.Add(logo); brand.Controls.Add(Theme.Caption("Zapret GUI", 18, true));
         sidebar.Controls.Add(brand, 0, 0);
-        FlowLayoutPanel navigation = new FlowLayoutPanel { AutoScroll = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        FlowLayoutPanel navigation = new GlassFlowPanel { FitChildrenWidth = true, AutoScroll = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         Button home = new SoftButton { Text = "Подключение", Width = 184, Height = 48, TextAlign = ContentAlignment.MiddleLeft };
         home.Click += delegate { strategies.Focus(); };
         features.Text = "Списки и обновления"; features.AutoSize = false; features.Size = new Size(184, 48); features.TextAlign = ContentAlignment.MiddleLeft;
@@ -223,19 +233,20 @@ internal sealed class MainWindow : SessionForm
         creators.Click += delegate { using (CreatorsWindow dialog = new CreatorsWindow()) dialog.ShowDialog(this); };
         Button themes = new SoftButton { Text = "Темы", Width = 184, Height = 48, TextAlign = ContentAlignment.MiddleLeft };
         themes.Click += delegate { using (ThemeWindow dialog = new ThemeWindow()) dialog.ShowDialog(this); };
-        navigation.Controls.AddRange(new Control[] { home, features, tests, themes, creators, advancedSettings });
-        navigation.SizeChanged += delegate { foreach (Control item in navigation.Controls) item.Width = Math.Max(80, navigation.ClientSize.Width - item.Margin.Horizontal - 2); };
-        sidebar.Controls.Add(navigation, 0, 1); FlowLayoutPanel preferences = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        Button localFiles = new SoftButton { Text = "Файлы Zapret", Width = 184, Height = 48, TextAlign = ContentAlignment.MiddleLeft };
+        localFiles.Click += delegate { try { ListUpdates.OpenFolder(folder); } catch (Exception error) { Error(error.Message); } };
+        navigation.Controls.AddRange(new Control[] { home, features, tests, themes, localFiles, creators, advancedSettings });
+        sidebar.Controls.Add(navigation, 0, 1); FlowLayoutPanel preferences = new GlassFlowPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         preferences.Controls.Add(advanced); preferences.Controls.Add(animations); sidebar.Controls.Add(preferences, 0, 2);
-        FlowLayoutPanel footer = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        footer.Controls.Add(Theme.Caption("Версия 0.9.11", 9, false));
+        FlowLayoutPanel footer = new GlassFlowPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        footer.Controls.Add(Theme.Caption("Версия 0.9.14", 9, false));
         Label help = Theme.Caption("Чтобы подобрать лучший альт, открой «Тестирование» и нажми «Проверить альты».", 9, false); help.MaximumSize = new Size(178, 0); footer.Controls.Add(help); sidebar.Controls.Add(footer, 0, 3);
         shell.Controls.Add(sidebar, 0, 0);
         TableLayoutPanel body = new ThemeCanvas { Dock = DockStyle.Fill, Padding = new Padding(24), RowCount = 5, ColumnCount = 1 };
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         body.RowStyles.Add(new RowStyle(SizeType.Absolute, 104)); body.RowStyles.Add(new RowStyle(SizeType.Absolute, 218));
         body.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); body.RowStyles.Add(new RowStyle(SizeType.AutoSize)); body.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
-        FlowLayoutPanel heading = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        FlowLayoutPanel heading = new GlassFlowPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         Label profileCaption = Theme.Caption("ВЫБРАННЫЙ ПРОФИЛЬ", 9, false);
         profileCaption.Margin = new Padding(0, 0, 0, 5);
         selectedHeading.Margin = Padding.Empty;
@@ -250,11 +261,11 @@ internal sealed class MainWindow : SessionForm
         header.Controls.Add(heading, 0, 0); header.Controls.Add(themeSwitch, 1, 0);
         body.Controls.Add(header, 0, 0);
         Card connection = new Card { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 16) };
-        FlowLayoutPanel connectionRows = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        FlowLayoutPanel connectionRows = new GlassFlowPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         status.Font = new Font("Segoe UI", 14F, FontStyle.Bold); status.MaximumSize = new Size(680, 0); status.Margin = new Padding(0, 0, 0, 12);
         connectionRows.Controls.Add(Theme.Caption("СОСТОЯНИЕ ПОДКЛЮЧЕНИЯ", 9, false));
         connectionRows.Controls.Add(status);
-        FlowLayoutPanel actions = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 10) };
+        FlowLayoutPanel actions = new GlassFlowPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 10) };
         start.Text = "Включить Zapret"; start.MinimumSize = new Size(152, 44); stop.MinimumSize = new Size(110, 44); startupButton.MinimumSize = new Size(208, 44);
         actions.Controls.AddRange(new Control[] { start, stop, startupButton }); connectionRows.Controls.Add(actions);
         connectionRows.Controls.Add(Theme.Caption("Автозапуск включает Zapret в фоне вместе с Windows. Окно оболочки открывается вручную.", 9, false));
@@ -270,7 +281,7 @@ internal sealed class MainWindow : SessionForm
         TableLayoutPanel folderRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
         folderRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); folderRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         folderRow.Controls.Add(folderBox, 0, 0); folderRow.Controls.Add(browse, 1, 0); details.Controls.Add(folderRow, 0, 0);
-        FlowLayoutPanel tools = new FlowLayoutPanel { Dock = DockStyle.Fill }; tools.Controls.AddRange(new Control[] { find, refresh, showLog });
+        FlowLayoutPanel tools = new GlassFlowPanel { Dock = DockStyle.Fill }; tools.Controls.AddRange(new Control[] { find, refresh, showLog });
         details.Controls.Add(tools, 0, 1); details.Controls.Add(eventsBox, 0, 2); technical.Controls.Add(details); body.Controls.Add(technical, 0, 3);
         body.Controls.Add(hostsHint, 0, 4); hostsHint.Cursor = Cursors.Hand; hostsHint.Click += delegate { OpenFeatures("Списки и обновления"); };
         shell.Controls.Add(body, 1, 0); Controls.Add(shell);
@@ -452,7 +463,9 @@ internal sealed class MainWindow : SessionForm
         startupButton.Text = serviceState.Automatic ? "Отключить автозагрузку" : "Включить автозагрузку";
         find.Enabled = idle && !serviceState.Running;
         features.Enabled = advancedSettings.Enabled = idle && folder.Length > 0;
-        browse.Enabled = refresh.Enabled = strategies.Enabled = idle && (!serviceState.Running || !serviceState.Owned);
+        browse.Enabled = refresh.Enabled = idle && (!serviceState.Running || !serviceState.Owned);
+        strategies.Enabled = idle;
+        ((GlassListBox)strategies).SelectionLocked = serviceState.Running && serviceState.Owned;
         showLog.Enabled = File.Exists(logFile);
     }
 
@@ -625,5 +638,102 @@ internal class SessionForm : Form
         if (message.Msg == 0x0011) { message.Result = new IntPtr(1); return; }
         if (message.Msg == 0x0016 && message.WParam != IntPtr.Zero) { Environment.Exit(0); return; }
         base.WndProc(ref message);
+    }
+}
+
+// A separate STA UI loop keeps the spinner moving while the main form is built.
+// The logo and palette are captured before starting the thread; no shared theme
+// state or main-window controls are accessed from the splash thread.
+internal sealed class StartupOverlay : IDisposable
+{
+    private readonly ManualResetEvent ready = new ManualResetEvent(false);
+    private readonly object sync = new object();
+    private Thread thread;
+    private LoadingWindow window;
+    private bool closing;
+    private readonly Bitmap logo;
+    private readonly Color background, accent, muted;
+    private readonly Rectangle screen;
+    internal StartupOverlay()
+    {
+        logo = Brand.CreateImage(128);
+        background = Theme.Background; accent = Theme.Accent; muted = Theme.Muted;
+        screen = Screen.FromPoint(Cursor.Position).WorkingArea;
+        thread = new Thread(Run) { IsBackground = true, Name = "Zapret GUI startup animation" };
+        thread.SetApartmentState(ApartmentState.STA); thread.Start();
+        // A bounded wait ensures the splash is visible before main-form creation.
+        ready.WaitOne(1500);
+    }
+    private void Run()
+    {
+        try
+        {
+            using (LoadingWindow form = new LoadingWindow(logo, background, accent, muted, screen))
+            {
+                lock (sync) { if (closing) return; window = form; }
+                form.Shown += delegate { ready.Set(); lock (sync) { if (closing) form.Close(); } };
+                Application.Run(form);
+            }
+        }
+        catch { ready.Set(); } // Startup decoration must never block the application.
+        finally { lock (sync) { window = null; } logo.Dispose(); }
+    }
+    public void Dispose()
+    {
+        lock (sync)
+        {
+            closing = true;
+            if (window != null && window.IsHandleCreated && !window.IsDisposed)
+                try { window.BeginInvoke((Action)delegate { window.Close(); }); } catch (InvalidOperationException) { }
+        }
+        // The background thread disposes its form, timer and image on exit.
+        if (thread != null && thread.Join(500)) { ready.Dispose(); thread = null; }
+    }
+}
+
+internal sealed class LoadingWindow : Form
+{
+    private readonly Bitmap logo;
+    private readonly Color accent, muted;
+    private readonly System.Windows.Forms.Timer clock = new System.Windows.Forms.Timer { Interval = 16 };
+    private readonly Stopwatch watch = new Stopwatch();
+    internal LoadingWindow(Bitmap image, Color background, Color color, Color secondary, Rectangle screen)
+    {
+        logo = image; accent = color; muted = secondary;
+        FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual; AutoScaleMode = AutoScaleMode.None;
+        ClientSize = new Size(264, 264); BackColor = background; DoubleBuffered = true;
+        Location = new Point(screen.Left + (screen.Width - Width) / 2, screen.Top + (screen.Height - Height) / 2);
+        using (System.Drawing.Drawing2D.GraphicsPath path = new System.Drawing.Drawing2D.GraphicsPath())
+        {
+            const int d = 40;
+            path.AddArc(0, 0, d, d, 180, 90); path.AddArc(Width - d, 0, d, d, 270, 90);
+            path.AddArc(Width - d, Height - d, d, d, 0, 90); path.AddArc(0, Height - d, d, d, 90, 90);
+            path.CloseFigure(); Region = new Region(path);
+        }
+        clock.Tick += delegate { Invalidate(new Rectangle(108, 194, 48, 48)); };
+        Shown += delegate { watch.Start(); clock.Start(); };
+        AccessibleName = "Запуск Zapret GUI";
+    }
+    protected override bool ShowWithoutActivation { get { return true; } }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        e.Graphics.DrawImage(logo, new Rectangle(68, 40, 128, 128));
+        Rectangle ring = new Rectangle(116, 202, 32, 32);
+        using (Pen track = new Pen(Color.FromArgb(45, muted), 3)) e.Graphics.DrawEllipse(track, ring);
+        using (Pen progress = new Pen(accent, 3))
+        {
+            progress.StartCap = progress.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+            float angle = (float)(watch.Elapsed.TotalMilliseconds * 0.32 % 360);
+            e.Graphics.DrawArc(progress, ring, angle - 90, 95);
+        }
+    }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { clock.Stop(); clock.Dispose(); if (Region != null) { Region old = Region; Region = null; old.Dispose(); } }
+        base.Dispose(disposing);
     }
 }
