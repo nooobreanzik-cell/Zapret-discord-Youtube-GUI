@@ -48,7 +48,7 @@ internal sealed class SmoothValue : IDisposable
     {
         if (target == next) return;
         from = value; target = next;
-        if (!Motion.Enabled || !SystemInformation.UIEffectsEnabled) { value = target; timer.Stop(); owner.Invalidate(); return; }
+        if (!Motion.Enabled || !SystemInformation.UIEffectsEnabled || !owner.Visible) { value = target; timer.Stop(); owner.Invalidate(); return; }
         watch.Restart(); timer.Start();
     }
     private void Step()

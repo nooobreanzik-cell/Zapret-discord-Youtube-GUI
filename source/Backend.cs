@@ -95,7 +95,7 @@ internal static class NetworkFiles
         ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
         HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
         request.Timeout = 15000; request.ReadWriteTimeout = 15000;
-        request.UserAgent = "Zapret-GUI/0.9.14";
+        request.UserAgent = "Zapret-GUI/0.9.15";
         request.AllowAutoRedirect = false;
         request.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore);
         using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())

@@ -168,7 +168,7 @@ internal static class Theme
             }
             control.Paint += delegate(object sender, PaintEventArgs e)
             {
-                if (SceneBackground && !(control is Card) && !(control is ThemeCanvas) && !(control is GlassFlowPanel))
+                if (SceneBackground && !(control is Card) && !(control is GuideCard) && !(control is ThemeCanvas) && !(control is GlassFlowPanel))
                 {
                     GlassScene.Backdrop(e.Graphics, control, control.ClientRectangle);
                     if ((string)control.Tag == "soft-panel") { if (Aero) ThemeArt.AeroEdge(e.Graphics, Rectangle.Inflate(control.ClientRectangle, -1, -1), Radius, Border); else GlassScene.Rim(e.Graphics, Rectangle.Inflate(control.ClientRectangle, -1, -1), 24); }
@@ -302,31 +302,34 @@ internal class SoftButton : Button
 {
     private bool hovered, pressed;
     private PointF lightSpot = new PointF(0.35F, 0.2F);
-    private readonly SmoothValue hover;
+    private readonly SmoothValue hover, press, focus;
     internal SoftButton()
     {
-        hover = new SmoothValue(this);
+        hover = new SmoothValue(this); press = new SmoothValue(this); focus = new SmoothValue(this);
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0;
     }
     protected override void OnMouseEnter(EventArgs e) { hovered = true; hover.Set(1); base.OnMouseEnter(e); Invalidate(); }
-    protected override void OnMouseLeave(EventArgs e) { hovered = pressed = false; hover.Set(0); base.OnMouseLeave(e); Invalidate(); }
+    protected override void OnMouseLeave(EventArgs e) { hovered = pressed = false; hover.Set(0); press.Set(0); base.OnMouseLeave(e); Invalidate(); }
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
         if (Theme.Liquid && Motion.Enabled) { lightSpot = new PointF(e.X / (float)Math.Max(1, Width), e.Y / (float)Math.Max(1, Height)); Invalidate(); }
     }
-    protected override void OnMouseDown(MouseEventArgs e) { pressed = true; base.OnMouseDown(e); Invalidate(); }
-    protected override void OnMouseUp(MouseEventArgs e) { pressed = false; base.OnMouseUp(e); Invalidate(); }
-    protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
-    protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
-    protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+    protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { pressed = true; press.Set(1); } base.OnMouseDown(e); }
+    protected override void OnMouseUp(MouseEventArgs e) { pressed = false; press.Set(0); base.OnMouseUp(e); }
+    protected override void OnMouseCaptureChanged(EventArgs e) { if (!Capture) { pressed = false; press.Set(0); } base.OnMouseCaptureChanged(e); }
+    protected override void OnKeyDown(KeyEventArgs e) { if (e.KeyCode == Keys.Space) press.Set(1); base.OnKeyDown(e); }
+    protected override void OnKeyUp(KeyEventArgs e) { if (e.KeyCode == Keys.Space) press.Set(0); base.OnKeyUp(e); }
+    protected override void OnEnabledChanged(EventArgs e) { if (!Enabled && hover != null) { hovered = pressed = false; hover.Set(0); press.Set(0); } base.OnEnabledChanged(e); Invalidate(); }
+    protected override void OnGotFocus(EventArgs e) { focus.Set(1); base.OnGotFocus(e); Invalidate(); }
+    protected override void OnLostFocus(EventArgs e) { focus.Set(0); press.Set(0); base.OnLostFocus(e); Invalidate(); }
     protected override void OnPaint(PaintEventArgs e)
     {
         Color parent = Parent == null ? Theme.Panel : Parent.BackColor;
         if (Theme.SceneBackground) GlassScene.Backdrop(e.Graphics, this, ClientRectangle); else e.Graphics.Clear(parent); e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         bool primary = (string)Tag == "primary";
-        Color fill = !Enabled ? Theme.Panel : pressed ? Theme.Selected : Motion.Blend(BackColor, primary ? Theme.PrimaryHover : Theme.Hover, hover.Value);
+        Color fill = !Enabled ? Theme.Panel : Motion.Blend(Motion.Blend(BackColor, primary ? Theme.PrimaryHover : Theme.Hover, Math.Max(hover.Value, ShowFocusCues ? focus.Value * 0.55 : 0)), Theme.Selected, press.Value);
         using (GraphicsPath path = Theme.Round(new Rectangle(1, 1, Math.Max(1, Width-3), Math.Max(1, Height-3)), (Theme.Aero ? 3 : Math.Min(Theme.Radius, 22))))
         using (Brush brush = new SolidBrush(fill))
         using (Pen border = new Pen(Focused && ShowFocusCues ? Theme.Accent : primary && Enabled ? Theme.Accent : Theme.Border))
@@ -360,7 +363,7 @@ internal sealed class SoftToggle : CheckBox
         int y = (Height - 18) / 2;
         using (GraphicsPath track = Theme.Round(new Rectangle(1, y, 30, 18), 9))
         using (Brush fill = new SolidBrush(Motion.Blend(Theme.Border, Theme.Accent, slide.Value))) e.Graphics.FillPath(fill, track);
-        using (Brush knob = new SolidBrush(Checked ? Theme.Background : Theme.Muted)) e.Graphics.FillEllipse(knob, (float)(4 + 12 * slide.Value), y + 3, 12, 12);
+        using (Brush knob = new SolidBrush(Motion.Blend(Theme.Muted, Theme.Background, slide.Value))) e.Graphics.FillEllipse(knob, (float)(4 + 12 * slide.Value), y + 3, 12, 12);
         TextRenderer.DrawText(e.Graphics, Text, Font, new Rectangle(40, 0, Math.Max(1,Width-42), Height), Enabled ? ForeColor : Theme.Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
         if (Focused && ShowFocusCues) using (Pen pen = new Pen(Theme.Accent)) e.Graphics.DrawLine(pen, 40, Height-2, Width-3, Height-2);
     }
@@ -1016,12 +1019,12 @@ internal static class GlassScene
                 g.DrawImage(scene, new Rectangle(source.X - origin.X, source.Y - origin.Y, source.Width, source.Height),
                     source.X, source.Y, source.Width, source.Height, GraphicsUnit.Pixel);
             Control layer = control;
-            while (layer != null && !(layer is Card) && (string)layer.Tag != "soft-panel") layer = layer.Parent;
+            while (layer != null && !(layer is Card) && !(layer is GuideCard) && (string)layer.Tag != "soft-panel") layer = layer.Parent;
             if (layer != null)
             {
                 Point anchor = Origin(layer);
                 Rectangle surface = new Rectangle(anchor.X - origin.X, anchor.Y - origin.Y, Math.Max(2, layer.Width), Math.Max(2, layer.Height));
-                using (GraphicsPath surfaceClip = Theme.Round(new Rectangle(surface.X + 2, surface.Y + 2, Math.Max(1, surface.Width - 5), Math.Max(1, surface.Height - 5)), Theme.Aero ? 3 : Theme.Radius))
+                using (GraphicsPath surfaceClip = Theme.Round(layer is GuideCard ? new Rectangle(surface.X, surface.Y, Math.Max(1, surface.Width - 1), Math.Max(1, surface.Height - 1)) : new Rectangle(surface.X + 2, surface.Y + 2, Math.Max(1, surface.Width - 5), Math.Max(1, surface.Height - 5)), layer is GuideCard ? (Theme.Aero ? 8 : 20) : Theme.Aero ? 3 : Theme.Radius))
                     g.SetClip(surfaceClip, CombineMode.Intersect);
                 using (Brush veil = new SolidBrush(Color.FromArgb((Theme.Liquid ? (int)(120 + 38 * Theme.Lightness) : Theme.Aero ? (Theme.Light ? 242 : 237) : 255), Theme.Panel))) g.FillRectangle(veil, bounds);
                 using (LinearGradientBrush sheen = new LinearGradientBrush(surface, Color.FromArgb((Theme.Liquid ? (int)(12 + 10 * Theme.Lightness) : Theme.Aero ? 12 : 0), Color.White), Color.FromArgb(0, Color.White), 125F)) g.FillRectangle(sheen, bounds);
@@ -1521,7 +1524,22 @@ internal sealed class ScrollSkin : NativeWindow
         if (m.Msg == 0x85 || m.Msg == 0xF || m.Msg == 0x115 || m.Msg == 0x20A || m.Msg == 5 || m.Msg == 0xA0 || m.Msg == 0xA1 || m.Msg == 0xA2)
             PaintBar();
     }
-    private void PaintBar()
+    // DrawToBitmap asks native controls to print, which can restore stock white rails.
+    // Repaint our rails into the captured window before the blur is generated.
+    internal static void PaintSnapshot(Control root, Bitmap snapshot)
+    {
+        Rectangle rootWindow; RECT rect;
+        if (!GetWindowRect(root.Handle, out rect)) return;
+        rootWindow = Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+        foreach (ScrollSkin skin in new List<ScrollSkin>(skins.Values))
+        {
+            if (!skin.owner.Visible || skin.owner.IsDisposed) continue;
+            Control parent = skin.owner;
+            while (parent != null && parent != root) parent = parent.Parent;
+            if (parent == root) skin.PaintBar(snapshot, rootWindow.Location);
+        }
+    }
+    private void PaintBar(Bitmap snapshot = null, Point screenOrigin = default(Point))
     {
         if (drawing || Handle == IntPtr.Zero || owner.IsDisposed || owner.RightToLeft == RightToLeft.Yes) return;
         if ((GetWindowLong(Handle, -16) & 0x200000) == 0) return;
@@ -1533,12 +1551,21 @@ internal sealed class ScrollSkin : NativeWindow
         int top = origin.Y - window.Top, height = owner.ClientSize.Height;
         int width = window.Right - window.Left - left;
         if (width < 4 || width > SystemInformation.VerticalScrollBarWidth + 8 || height < 4) return;
-        drawing = true; IntPtr dc = GetWindowDC(Handle);
+        drawing = true; IntPtr dc = snapshot == null ? GetWindowDC(Handle) : IntPtr.Zero;
         try
         {
-            if (dc == IntPtr.Zero) return;
-            using (Graphics g = Graphics.FromHdc(dc))
+            if (snapshot == null && dc == IntPtr.Zero) return;
+            using (Graphics g = snapshot == null ? Graphics.FromHdc(dc) : Graphics.FromImage(snapshot))
             {
+                if (snapshot != null)
+                {
+                    g.TranslateTransform(window.Left - screenOrigin.X, window.Top - screenOrigin.Y);
+                    for (Control parent = owner.Parent; parent != null; parent = parent.Parent)
+                    {
+                        Rectangle clip = parent.RectangleToScreen(parent.ClientRectangle);
+                        clip.Offset(-window.Left, -window.Top); g.SetClip(clip, CombineMode.Intersect);
+                    }
+                }
                 Color background = owner.BackColor.A == 255 ? owner.BackColor : Theme.Panel;
                 if (Theme.SceneBackground)
                 {

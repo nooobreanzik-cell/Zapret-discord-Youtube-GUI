@@ -107,25 +107,30 @@ internal sealed class FeaturesWindow : SessionForm
         });
 
         FlowLayoutPanel updates = Page("Списки и обновления", false);
-        Label(updates, "Hosts заменяется по кнопке или при включённой автопроверке, с резервной копией. Встроенная версия GUI содержит исправление ChatGPT от 14.10.2026. Все остальные записи берутся из снимка V3nilla.");
-        Label(updates, "Адрес стороннего сервера GeoHide для ChatGPT / OpenAI. Проверенный пользователем адрес: 193.233.112.88. Доступность может измениться. Сохранённый адрес используется и при скачивании свежего hosts.");
-        updates.Controls.Add(geohideAddress);
+        FlowLayoutPanel hosts = Page("Hosts и адреса", true);
+        Label(updates, "Обновляй списки при необходимости. После изменения останови и снова включи Zapret. Дополнительные настройки hosts и адресов доступны в Advanced mode.");
+        Label(updates, "Hosts: «Заменить» применяет встроенный список GUI с сохранённым адресом. Перед изменением создаётся резервная копия. «Восстановить» позволяет выбрать прежнюю копию.");
+        Button(updates, "Заменить hosts", delegate { UpdateHosts(null, 0); });
+        Button(updates, "Восстановить hosts", RestoreHosts);
+        Label(hosts, "Hosts заменяется по кнопке или при включённой автопроверке, с резервной копией. Встроенная версия GUI содержит исправление ChatGPT от 14.10.2026. Все остальные записи берутся из снимка V3nilla.");
+        Label(hosts, "Адрес стороннего сервера GeoHide для ChatGPT / OpenAI. Проверенный пользователем адрес: 193.233.112.88. Доступность может измениться. Сохранённый адрес используется и при скачивании свежего hosts.");
+        hosts.Controls.Add(geohideAddress);
         try { geohideAddress.Text = ListUpdates.LoadAddress(); }
         catch (Exception error) { Append("Не удалось прочитать адрес GeoHide: " + error.Message); }
-        Button(updates, "Сохранить адрес GeoHide", delegate { ListUpdates.SaveAddress(geohideAddress.Text); Append("Адрес сохранён. Для изменения hosts выбери действие ниже."); });
-        Label(updates, "Поиск в issues V3nilla для всех публичных IPv4-перенаправлений в hosts. Записи 0.0.0.0 не меняются. За запуск проверяется до 25 доменов; следующий запуск продолжает обход. Замена выполняется после двух сбоев текущего адреса и успешных HTTPS-проверок нового. Ответы 403/429 считаются неоднозначными. Рабочий hosts сохраняется.");
+        Button(hosts, "Сохранить адрес GeoHide", delegate { ListUpdates.SaveAddress(geohideAddress.Text); Append("Адрес сохранён. Для изменения hosts выбери действие ниже."); });
+        Label(hosts, "Поиск в issues V3nilla для всех публичных IPv4-перенаправлений в hosts. Записи 0.0.0.0 не меняются. За запуск проверяется до 25 доменов; следующий запуск продолжает обход. Замена выполняется после двух сбоев текущего адреса и успешных HTTPS-проверок нового. Ответы 403/429 считаются неоднозначными. Рабочий hosts сохраняется.");
         CheckBox issueAuto = new SoftToggle { Text = "Проверять issues и исправлять адрес при запуске GUI", AutoSize = true, Checked = IssueRepair.Enabled };
         issueAuto.CheckedChanged += delegate { try { IssueRepair.Enable(issueAuto.Checked); } catch (Exception error) { Append(error.Message); } };
-        updates.Controls.Add(issueAuto);
-        Button(updates, "Проверить hosts и найти замены в issues", delegate { Work(delegate { return IssueRepair.Run(); }); });
-        Button(updates, "Журнал проверки issues", delegate { log.Visible = true; notice.Visible = false; Append(IssueRepair.LastLog); });
+        hosts.Controls.Add(issueAuto);
+        Button(hosts, "Проверить hosts и найти замены в issues", delegate { Work(delegate { return IssueRepair.Run(); }); });
+        Button(hosts, "Журнал проверки issues", delegate { log.Visible = true; notice.Visible = false; Append(IssueRepair.LastLog); });
         Button(updates, "Добавить домены Meta / Quest на ПК", delegate { Work(delegate { return IssueRepair.MetaDomains(folder); }); });
         Button(updates, "Скачать Meta Quest Developer Hub", delegate { Process.Start(new ProcessStartInfo("https://developers.meta.com/horizon/downloads/package/oculus-developer-hub-win/") { UseShellExecute = true }); });
         Button(updates, "Открыть страницу Meta Quest Link", delegate { Process.Start(new ProcessStartInfo("https://www.meta.com/quest/setup/") { UseShellExecute = true }); });
-        Button(updates, "Применить hosts · версия GUI", delegate { UpdateHosts(null, 0); });
-        Button(updates, "Обновить hosts · V3nilla + настройки GUI", delegate { UpdateHosts(null, 1); });
-        Button(updates, "Исправить только ChatGPT в текущем hosts", delegate { UpdateHosts(null, 2); });
-        Button(updates, "Скачать hosts GUI для ручной замены", delegate
+        Button(hosts, "Применить hosts · версия GUI", delegate { UpdateHosts(null, 0); });
+        Button(hosts, "Обновить hosts · V3nilla + настройки GUI", delegate { UpdateHosts(null, 1); });
+        Button(hosts, "Исправить только ChatGPT в текущем hosts", delegate { UpdateHosts(null, 2); });
+        Button(hosts, "Скачать hosts GUI для ручной замены", delegate
         {
             string address = ReadHostsAddress();
             Work(delegate
@@ -135,27 +140,27 @@ internal sealed class FeaturesWindow : SessionForm
                 return HostsManual.Instructions(path) + HostsManual.OpenFolders(path);
             });
         });
-        Button(updates, "Кто использует hosts?", delegate
+        Button(hosts, "Кто использует hosts?", delegate
         {
             log.Visible = true; notice.Visible = false;
             Work(delegate { return HostsLockReport.Read(HostsPath); });
         });
-        Button(updates, "Скопировать журнал hosts", delegate { if (log.TextLength > 0) Clipboard.SetText(log.Text); });
-        Button(updates, "Заменить hosts из локального файла…", delegate
+        Button(hosts, "Скопировать журнал hosts", delegate { if (log.TextLength > 0) Clipboard.SetText(log.Text); });
+        Button(hosts, "Заменить hosts из локального файла…", delegate
         {
             using (OpenFileDialog dialog = new OpenFileDialog { Title = "Выбери скачанный hosts", Filter = "Все файлы|*.*" })
                 if (dialog.ShowDialog(this) == DialogResult.OK) UpdateHosts(dialog.FileName);
         });
-        Button(updates, "Восстановить hosts из резервной копии…", RestoreHosts);
-        Button(updates, "Проверить, не изменился ли hosts", delegate { Work(delegate { string changed = HostsGuard.Check(); return changed.Length == 0 ? "Изменение не обнаружено (контроль начинается после применения hosts через GUI)." : changed; }); });
-        Button(updates, "Вернуть последний применённый hosts", delegate { Work(delegate { return HostsGuard.Restore() + " " + FlushDns(); }); });
-        Label(updates, "Контроль hosts сообщает об изменениях. Причину изменения он не определяет: это может быть антивирус, другая программа или ручная правка. Восстановление выполняется только по твоей кнопке.");
+        Button(hosts, "Восстановить hosts из резервной копии…", RestoreHosts);
+        Button(hosts, "Проверить, не изменился ли hosts", delegate { Work(delegate { string changed = HostsGuard.Check(); return changed.Length == 0 ? "Изменение не обнаружено (контроль начинается после применения hosts через GUI)." : changed; }); });
+        Button(hosts, "Вернуть последний применённый hosts", delegate { Work(delegate { return HostsGuard.Restore() + " " + FlushDns(); }); });
+        Label(hosts, "Контроль hosts сообщает об изменениях. Причину изменения он не определяет: это может быть антивирус, другая программа или ручная правка. Восстановление выполняется только по твоей кнопке.");
         Label(updates, "Список доменов V3nilla («Сам список.txt») заменяет list-general.txt. Он большой и может повысить расход памяти. Пользовательский list-general-user.txt не заменяется. После изменения списков перезапусти Zapret.");
         Button(updates, "Обновить список доменов · V3nilla", delegate
         {
             Work(delegate { return ListUpdates.UpdateGeneral(folder, NetworkFiles.Download(ListUpdates.DomainsUrl, 16 * 1024 * 1024)); });
         });
-        Button(updates, "Заменить список доменов из файла…", delegate
+        if (advancedMode) Button(updates, "Заменить список доменов из файла…", delegate
         {
             using (OpenFileDialog dialog = new OpenFileDialog { Filter = "Списки доменов|*.txt|Все файлы|*.*" })
             {
@@ -167,9 +172,10 @@ internal sealed class FeaturesWindow : SessionForm
         Button(updates, "Добавить домены ChatGPT в пользовательский список", delegate { Work(delegate { return ListUpdates.AddChatDomains(folder); }); });
         Button(updates, "Восстановить список доменов…", delegate { RestoreList("list-general.txt", false); });
         Button(updates, "Восстановить пользовательский список…", delegate { RestoreList("list-general-user.txt", false); });
-        Label(updates, "IP-список определяет адреса, которые обрабатывает Zapret. Источник по умолчанию — V3nilla. После обновления останови и снова включи Zapret.");
-        updates.Controls.Add(ipSource); ipSource.Visible = advancedMode; ipSource.TabStop = advancedMode;
-        Button(updates, "Обновить IP-список", delegate
+        FlowLayoutPanel ipLists = Page("IP-списки", true);
+        Label(ipLists, "IP-список определяет адреса, которые обрабатывает Zapret. Источник по умолчанию — V3nilla. После обновления останови и снова включи Zapret.");
+        ipLists.Controls.Add(ipSource); ipSource.Visible = advancedMode; ipSource.TabStop = advancedMode;
+        Button(ipLists, "Обновить IP-список", delegate
         {
             string url = ipSource.SelectedIndex == 0 ? NetworkFiles.VanillaIpset : NetworkFiles.FlowsealIpset;
             Work(delegate
@@ -179,7 +185,7 @@ internal sealed class FeaturesWindow : SessionForm
                 return "IP-набор обновлён (" + count + " записей). Режим loaded. Перезапусти Zapret. Копия: " + backup;
             });
         });
-        Button(updates, "Восстановить IP-список…", delegate { RestoreList("ipset-all.txt", true); });
+        Button(ipLists, "Восстановить IP-список…", delegate { RestoreList("ipset-all.txt", true); });
         Button(updates, "Проверить обновления Zapret", delegate
         {
             Work(delegate
@@ -190,7 +196,7 @@ internal sealed class FeaturesWindow : SessionForm
         });
         Button(updates, "Открыть официальный релиз Flowseal", delegate { Process.Start("https://github.com/Flowseal/zapret-discord-youtube/releases/latest"); });
 
-        FlowLayoutPanel localFiles = Page("Локальные файлы", false);
+        FlowLayoutPanel localFiles = Page("Локальные файлы", true);
         Label(localFiles, "Открывается фактически подключённая папка Zapret: " + folder);
         Button(localFiles, "Открыть папку Zapret", delegate { ListUpdates.OpenFolder(folder); });
         Button(localFiles, "Открыть папку списков", delegate { ListUpdates.OpenFolder(Path.Combine(folder, "lists")); });
@@ -203,12 +209,12 @@ internal sealed class FeaturesWindow : SessionForm
         });
 
         FlowLayoutPanel tools = Page("Тестирование", false);
-        Button(tools, "Диагностика автозапуска", delegate
+        if (advancedMode) Button(tools, "Диагностика автозапуска", delegate
         {
             log.Visible = true; notice.Visible = false;
             Work(delegate { return ZapretService.Diagnose(folder); });
         });
-        Button(tools, "Скопировать журнал", delegate { if (log.TextLength > 0) Clipboard.SetText(log.Text); });
+        if (advancedMode) Button(tools, "Скопировать журнал", delegate { if (log.TextLength > 0) Clipboard.SetText(log.Text); });
         Label(tools, "Проверь альты в своей сети. Выбор режима, ход проверки и лучший результат появятся в окне приложения. Для начала подходит обычная проверка HTTP и ping.");
         if (advancedMode) Button(tools, "Диагностика и исправления", delegate
         {
@@ -216,7 +222,7 @@ internal sealed class FeaturesWindow : SessionForm
             LaunchTool(false);
         });
         Button(tools, "Проверить альты", delegate { LaunchTool(true); });
-        Button(tools, "Открыть результаты тестов", delegate
+        if (advancedMode) Button(tools, "Открыть результаты тестов", delegate
         {
             string path = Path.Combine(folder, "utils", "test results"); Directory.CreateDirectory(path);
             Process.Start(new ProcessStartInfo("explorer.exe", "\"" + path + "\"") { UseShellExecute = true });
@@ -399,6 +405,7 @@ internal sealed class FeaturesWindow : SessionForm
             else bytes = ListUpdates.PrepareHosts(File.ReadAllBytes(HostsPath), address);
             int count = Files.ValidateHosts(bytes);
             byte[] applied = new UTF8Encoding(false).GetBytes(Files.Text(bytes));
+            if (File.ReadAllBytes(HostsPath).SequenceEqual(applied)) return "Этот hosts уже установлен. Повторная запись и новая резервная копия не нужны.";
             string backup;
             try { backup = HostsWriter.Replace(HostsPath, applied, expectedHash); }
             catch (Exception error)
@@ -415,7 +422,8 @@ internal sealed class FeaturesWindow : SessionForm
     }
     private void RestoreHosts()
     {
-        using (OpenFileDialog dialog = new OpenFileDialog { Title = "Выбери резервную копию hosts", InitialDirectory = Path.GetDirectoryName(HostsPath), Filter = "Копии Zapret GUI|hosts.zapretgui.*.bak" })
+        string backupFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ZapretSimpleGui", "hosts-backups");
+        using (OpenFileDialog dialog = new OpenFileDialog { Title = "Выбери резервную копию hosts", InitialDirectory = Directory.Exists(backupFolder) ? backupFolder : Path.GetDirectoryName(HostsPath), Filter = "Копии Zapret GUI|hosts.zapretgui.*.bak|Все файлы|*.*" })
         {
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             string path = dialog.FileName;
@@ -424,6 +432,7 @@ internal sealed class FeaturesWindow : SessionForm
                 byte[] bytes = File.ReadAllBytes(path);
                 // Original hosts can legitimately contain only comments or be empty.
                 if (bytes.Length > 8 * 1024 * 1024) throw new IOException("Слишком большая резервная копия.");
+                if (File.ReadAllBytes(HostsPath).SequenceEqual(bytes)) return "Содержимое hosts уже совпадает с выбранной копией. Повторная запись не нужна.";
                 string backup = HostsWriter.Replace(HostsPath, bytes, HostsWriter.ReadHash(HostsPath));
                 HostsGuard.Remember(bytes);
                 return "Hosts восстановлен. Предыдущая версия: " + backup + ". " + FlushDns();

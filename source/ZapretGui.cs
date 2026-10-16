@@ -18,8 +18,8 @@ using System.Security.Principal;
 using System.Reflection;
 using Microsoft.Win32;
 
-[assembly: AssemblyVersion("0.9.14.0")]
-[assembly: AssemblyFileVersion("0.9.14.0")]
+[assembly: AssemblyVersion("0.9.15.0")]
+[assembly: AssemblyFileVersion("0.9.15.0")]
 
 internal static class Program
 {
@@ -57,7 +57,7 @@ internal static class Program
                 {
                     MainWindow main = new MainWindow();
                     EventHandler finishLoading = null;
-                    finishLoading = delegate { main.Shown -= finishLoading; loading.Dispose(); };
+                    finishLoading = delegate { main.Shown -= finishLoading; loading.Dispose(); main.BeginInvoke((MethodInvoker)delegate { if (!main.IsDisposed && main.Visible) GuideExperience.Invite(main); }); };
                     main.Shown += finishLoading;
                     Application.Run(main);
                 }
@@ -108,7 +108,8 @@ internal sealed class MainWindow : SessionForm
     private readonly Label hostsHint = Theme.Caption("Крестик сворачивает окно в трей. Чтобы отключить Zapret, нажми «Остановить».", 9, false);
     private readonly Label selectedHeading = Theme.Caption("Выбери альт", 22, true);
     private readonly CheckBox animations = new SoftToggle { Text = "Плавные анимации", AutoSize = false, Width = 180, Height = 50, Checked = true };
-    private readonly CheckBox advanced = new SoftToggle { Text = "Advanced mode\r\nВсе настройки", AutoSize = false, Width = 180, Height = 88 };
+    private readonly CheckBox advanced = new SoftToggle { Text = "Advanced mode\r\nРасширенные настройки", AutoSize = false, Width = 180, Height = 88 };
+    private readonly Button localFiles = new SoftButton { Text = "Файлы Zapret", Width = 184, Height = 48, TextAlign = ContentAlignment.MiddleLeft };
     private readonly Button advancedSettings = new SoftButton { Text = "Технические настройки", Width = 184, Height = 56 };
     private readonly Panel technical = new Panel { Dock = DockStyle.Fill, Height = 164, MinimumSize = new Size(0, 164) };
     private readonly Label recommendationHint = Theme.Caption("Альт — набор настроек обхода блокировок. Если доступ не появился, попробуй другой или запусти тестирование.", 10, false);
@@ -233,13 +234,14 @@ internal sealed class MainWindow : SessionForm
         creators.Click += delegate { using (CreatorsWindow dialog = new CreatorsWindow()) dialog.ShowDialog(this); };
         Button themes = new SoftButton { Text = "Темы", Width = 184, Height = 48, TextAlign = ContentAlignment.MiddleLeft };
         themes.Click += delegate { using (ThemeWindow dialog = new ThemeWindow()) dialog.ShowDialog(this); };
-        Button localFiles = new SoftButton { Text = "Файлы Zapret", Width = 184, Height = 48, TextAlign = ContentAlignment.MiddleLeft };
         localFiles.Click += delegate { try { ListUpdates.OpenFolder(folder); } catch (Exception error) { Error(error.Message); } };
-        navigation.Controls.AddRange(new Control[] { home, features, tests, themes, localFiles, creators, advancedSettings });
+        Button guide = new SoftButton { Text = "Прочитать гайд", Width = 184, Height = 48, TextAlign = ContentAlignment.MiddleLeft };
+        guide.Click += delegate { GuideExperience.Read(this); };
+        navigation.Controls.AddRange(new Control[] { home, features, tests, themes, guide, localFiles, creators, advancedSettings });
         sidebar.Controls.Add(navigation, 0, 1); FlowLayoutPanel preferences = new GlassFlowPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         preferences.Controls.Add(advanced); preferences.Controls.Add(animations); sidebar.Controls.Add(preferences, 0, 2);
         FlowLayoutPanel footer = new GlassFlowPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        footer.Controls.Add(Theme.Caption("Версия 0.9.14", 9, false));
+        footer.Controls.Add(Theme.Caption("Версия 0.9.15", 9, false));
         Label help = Theme.Caption("Чтобы подобрать лучший альт, открой «Тестирование» и нажми «Проверить альты».", 9, false); help.MaximumSize = new Size(178, 0); footer.Controls.Add(help); sidebar.Controls.Add(footer, 0, 3);
         shell.Controls.Add(sidebar, 0, 0);
         TableLayoutPanel body = new ThemeCanvas { Dock = DockStyle.Fill, Padding = new Padding(24), RowCount = 5, ColumnCount = 1 };
@@ -295,7 +297,8 @@ internal sealed class MainWindow : SessionForm
 
     private void ApplyMode()
     {
-        technical.Visible = advancedSettings.Visible = advanced.Checked;
+        technical.Visible = advancedSettings.Visible = localFiles.Visible = advanced.Checked;
+        localFiles.TabStop = advanced.Checked;
         advancedSettings.TabStop = advanced.Checked;
         strategies.Invalidate();
     }
@@ -735,5 +738,174 @@ internal sealed class LoadingWindow : Form
     {
         if (disposing) { clock.Stop(); clock.Dispose(); if (Region != null) { Region old = Region; Region = null; old.Dispose(); } }
         base.Dispose(disposing);
+    }
+}
+
+// Kept outside the installer keys and application directory across reinstalls.
+internal static class GuideExperience
+{
+    private const string Preferences = @"Software\ZapretGuiUserPreferences";
+    internal static void Invite(Form owner)
+    {
+        try { using (RegistryKey key = Registry.CurrentUser.OpenSubKey(Preferences)) if (key != null && Convert.ToString(key.GetValue("HideGuideOnStartup", 0)) == "1") return; }
+        catch { /* An unavailable preference must not prevent startup. */ }
+        bool read;
+        using (GuideInvitation dialog = new GuideInvitation(owner)) read = dialog.ShowDialog(owner) == DialogResult.OK;
+        if (read && !owner.IsDisposed) Read(owner);
+    }
+    internal static void SaveHidden()
+    {
+        using (RegistryKey key = Registry.CurrentUser.CreateSubKey(Preferences))
+        {
+            if (key == null) throw new IOException("Не удалось открыть настройки пользователя.");
+            key.SetValue("HideGuideOnStartup", 1, RegistryValueKind.DWord);
+        }
+    }
+    internal static void Read(Form owner) { using (GuideWindow dialog = new GuideWindow()) dialog.ShowDialog(owner); }
+}
+
+internal sealed class GuideInvitation : Form
+{
+    private Bitmap backdrop;
+    private readonly GuideCard card = new GuideCard();
+    private readonly SoftToggle hide = new SoftToggle { Text = "Больше не показывать", AutoSize = true, Font = new Font("Segoe UI", 10F), Margin = new Padding(0, 8, 0, 12) };
+    internal GuideInvitation(Form owner)
+    {
+        Text = "Короткий гайд по Zapret GUI"; FormBorderStyle = FormBorderStyle.None;
+        StartPosition = FormStartPosition.Manual; ShowInTaskbar = false; AutoScaleMode = AutoScaleMode.None;
+        Bounds = owner.RectangleToScreen(owner.ClientRectangle); DoubleBuffered = true;
+        // Capture only our own window, in memory. Downsampling softens the backdrop.
+        try
+        {
+            using (Bitmap capture = new Bitmap(owner.Width, owner.Height))
+            {
+                owner.DrawToBitmap(capture, new Rectangle(Point.Empty, capture.Size));
+                ScrollSkin.PaintSnapshot(owner, capture);
+                using (Bitmap small = new Bitmap(Math.Max(1, Width / 12), Math.Max(1, Height / 12)))
+                {
+                    Point offset = owner.PointToScreen(Point.Empty); offset.Offset(-owner.Left, -owner.Top);
+                    using (Graphics g = Graphics.FromImage(small))
+                    { g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBilinear; g.DrawImage(capture, new Rectangle(Point.Empty, small.Size), new Rectangle(offset, owner.ClientSize), GraphicsUnit.Pixel); }
+                    backdrop = new Bitmap(Width, Height);
+                    using (Graphics g = Graphics.FromImage(backdrop))
+                    { g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic; g.DrawImage(small, new Rectangle(Point.Empty, backdrop.Size)); }
+                }
+            }
+        }
+        catch { if (backdrop != null) { backdrop.Dispose(); backdrop = null; } }
+        card.Size = new Size(Math.Min(520, Math.Max(280, Width - 40)), Math.Min(400, Math.Max(260, Height - 32)));
+        card.Location = new Point((Width - card.Width) / 2, (Height - card.Height) / 2);
+        TableLayoutPanel content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(8), Margin = Padding.Empty };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        content.Controls.Add(new GuideGlyph { Size = new Size(56, 56), Anchor = AnchorStyles.None, Margin = Padding.Empty }, 0, 0);
+        Label title = Theme.Caption("С чего начать?", 22, true);
+        title.AutoSize = false; title.Dock = DockStyle.Fill; title.TextAlign = ContentAlignment.MiddleCenter; title.Margin = Padding.Empty;
+        content.Controls.Add(title, 0, 1);
+        Label description = Theme.Caption("Короткий гайд поможет выбрать альт, настроить DNS и разобраться со входом в Meta. Его всегда можно открыть из меню.", 11, false);
+        description.AutoSize = false; description.Dock = DockStyle.Fill; description.TextAlign = ContentAlignment.MiddleCenter;
+        description.Margin = new Padding(8, 4, 8, 8); content.Controls.Add(description, 0, 2);
+        hide.Anchor = AnchorStyles.None; content.Controls.Add(hide, 0, 3);
+        FlowLayoutPanel actions = new GlassFlowPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Anchor = AnchorStyles.None, Margin = Padding.Empty };
+        Button read = new SoftButton { Text = "Прочитать гайд", Size = new Size(190, 44), Tag = "primary", Margin = new Padding(0, 0, 8, 0), Font = new Font("Segoe UI", 10F, FontStyle.Bold) };
+        Button later = new SoftButton { Text = "Не сейчас", Size = new Size(145, 44), DialogResult = DialogResult.Cancel, Margin = Padding.Empty, Font = new Font("Segoe UI", 10F) };
+        read.Click += delegate { DialogResult = DialogResult.OK; Close(); };
+        actions.Controls.Add(read); actions.Controls.Add(later); content.Controls.Add(actions, 0, 4);
+        card.Controls.Add(content); Controls.Add(card); AcceptButton = read; CancelButton = later; Theme.Apply(this);
+        // Round the card itself so its background cannot leave square corners on the blur.
+        card.Padding = Theme.Aero ? new Padding(20, 36, 20, 20) : new Padding(20);
+        using (System.Drawing.Drawing2D.GraphicsPath outline = Theme.Round(new Rectangle(0, 0, card.Width - 1, card.Height - 1), Theme.Aero ? 8 : 20)) card.Region = new Region(outline);
+    }
+    protected override void OnShown(EventArgs e) { base.OnShown(e); Motion.Show(this); }
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        if (backdrop != null) e.Graphics.DrawImageUnscaled(backdrop, Point.Empty); else e.Graphics.Clear(Theme.Background);
+        using (Brush tint = new SolidBrush(Color.FromArgb(105, Theme.Background))) e.Graphics.FillRectangle(tint, ClientRectangle);
+    }
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (hide.Checked)
+            try { GuideExperience.SaveHidden(); }
+            catch (Exception error) { MessageBox.Show(this, "Не удалось сохранить выбор. При следующем запуске приглашение может появиться снова.\n\n" + error.Message, "Zapret GUI", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+        base.OnFormClosing(e);
+    }
+    protected override void Dispose(bool disposing)
+    { if (disposing && backdrop != null) { backdrop.Dispose(); backdrop = null; } base.Dispose(disposing); }
+}
+
+internal sealed class GuideGlyph : Control
+{
+    internal GuideGlyph() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); }
+    protected override void OnPaintBackground(PaintEventArgs e)
+    { if (Theme.SceneBackground) GlassScene.Backdrop(e.Graphics, this, ClientRectangle); else base.OnPaintBackground(e); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (Pen pen = new Pen(Theme.Accent, 2.5F))
+        {
+            e.Graphics.DrawLines(pen, new Point[] { new Point(28, 46), new Point(9, 41), new Point(9, 10), new Point(28, 15), new Point(47, 10), new Point(47, 41), new Point(28, 46), new Point(28, 15) });
+            e.Graphics.DrawLine(pen, 15, 21, 22, 23); e.Graphics.DrawLine(pen, 15, 28, 22, 30);
+            e.Graphics.DrawLine(pen, 34, 23, 41, 21); e.Graphics.DrawLine(pen, 34, 30, 41, 28);
+        }
+    }
+}
+
+internal sealed class GuideWindow : SessionForm
+{
+    private readonly GlassFlowPanel sections = new GlassFlowPanel { Dock = DockStyle.Fill, AutoScroll = true, FitChildrenWidth = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(24) };
+    internal GuideWindow()
+    {
+        Text = "Гайд • Zapret GUI"; StartPosition = FormStartPosition.CenterParent;
+        Size = new Size(760, 720); MinimumSize = new Size(520, 420);
+        Size screen = Screen.FromPoint(Cursor.Position).WorkingArea.Size; Size = new Size(Math.Min(Width, screen.Width), Math.Min(Height, screen.Height));
+        Add("Гайд по Zapret GUI", "Основные настройки и помощь, если сайт или вход в аккаунт не открывается.");
+        Add("Важно: проверь DNS", "Если Meta Quest Developer Hub, Quest Link или сайты Meta не открываются, причиной может быть DNS. Одного запуска Zapret и обновления hosts может быть недостаточно.\n\nВ нашем случае обычный DNS возвращал «домен не существует» для auth.meta.com. После включения DNS по HTTPS в Windows 11 вход заработал. Это подтверждено для конкретного подключения и не гарантирует устранение любой ошибки входа.");
+        Add("DNS по HTTPS в Windows 11", "1. Открой Параметры → Сеть и Интернет → активное подключение Ethernet или свойства сети Wi-Fi.\n2. Найди «Назначение DNS-сервера» → «Изменить». Сохрани прежние настройки для отката.\n3. Выбери «Вручную», включи IPv4.\n4. Предпочитаемый DNS: 1.1.1.1. Альтернативный: 1.0.0.1.\n5. Для обоих включи DNS по HTTPS с автоматическим шаблоном. Возврат к незашифрованному DNS, если доступен, выключи.\n\nМеняй назначение DNS-сервера, а не IP-адрес компьютера. Простая замена DNS без HTTPS может не помочь. Названия пунктов могут отличаться в зависимости от версии Windows.");
+        Add("После изменения DNS", "Выполни в PowerShell или командной строке:\n\nipconfig /flushdns\n\nПолностью закрой проблемное приложение и браузер, затем открой снова. Оставь Zapret включённым с рабочей стратегией. Для отката верни сохранённые настройки DNS.");
+        Add("Выбери рабочий альт", "На странице подключения выбери стратегию и нажми «Включить Zapret». Если нужный сервис не работает, открой «Тестирование» → «Проверить альты». Результат зависит от подключения: единого лучшего альта для всех нет. Перед сменой стратегии останови Zapret.");
+        Add("Списки и hosts", "В «Списки и обновления» можно обновлять домены, работать с hosts и резервными копиями. Перед изменениями сохрани рабочую папку Zapret и hosts. После изменения списков останови и снова запусти Zapret.\n\nАвтопроверка ищет замену для существующих перенаправлений на публичные IPv4 и проверяет кандидатов по HTTPS. Записи 0.0.0.0 не изменяются. Локальные, служебные, IPv6 и конфликтующие записи пропускаются. За проход проверяется до 25 доменов, затем обход продолжается. Ответы 403 и 429 не запускают замену.\n\nПеред записью создаётся резервная копия. Эта функция не исправляет системный DNS и не гарантирует работу всех сайтов. Полное обновление hosts может перезаписать точечные исправления.");
+        Add("Meta Quest и вход в аккаунт", "В приложении есть добавление доменов Meta / Quest в пользовательский список и ссылки на страницы скачивания Developer Hub и Quest Link. Если приложение открывается, но вход зависает, проверь DNS по инструкции выше и перезапусти приложение вместе с браузером. Доступ ко всем сервисам Meta не гарантируется.");
+        Add("Гайд всегда под рукой", "Кнопка «Прочитать гайд» находится в боковом меню. Галочка «Больше не показывать» скрывает только приглашение при запуске. Выбор сохраняется для текущей учётной записи Windows и переживает обычное обновление, удаление и повторную установку. При удалении пользовательских настроек или смене учётной записи приглашение появится снова.");
+        Button close = new SoftButton { Text = "Понятно", Dock = DockStyle.Bottom, Height = 48, DialogResult = DialogResult.OK };
+        sections.SizeChanged += delegate { FitText(); };
+        Controls.Add(sections); Controls.Add(close); CancelButton = close; Theme.Apply(this); FitText();
+    }
+    private void FitText()
+    {
+        int width = Math.Max(160, sections.ClientSize.Width - sections.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - 8);
+        foreach (Control label in sections.Controls) label.MaximumSize = new Size(width, 0);
+    }
+    private void Add(string heading, string body)
+    {
+        Label title = Theme.Caption(heading, 17, true); title.Margin = new Padding(0, 12, 0, 10);
+        Label text = Theme.Caption(body, 11, false); text.Margin = new Padding(0, 0, 0, 20);
+        sections.Controls.Add(title); sections.Controls.Add(text);
+    }
+}
+
+// The invitation owns one complete surface, with matching paint and clip bounds.
+internal sealed class GuideCard : Panel
+{
+    internal GuideCard() { DoubleBuffered = true; SetStyle(ControlStyles.ResizeRedraw, true); Padding = new Padding(20); }
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        Rectangle r = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+        int radius = Theme.Aero ? 8 : 20;
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        e.Graphics.Clear(Theme.Panel);
+        using (System.Drawing.Drawing2D.GraphicsPath path = Theme.Round(r, radius))
+        {
+            System.Drawing.Drawing2D.GraphicsState state = e.Graphics.Save();
+            e.Graphics.SetClip(path, System.Drawing.Drawing2D.CombineMode.Intersect);
+            if (Theme.SceneBackground) GlassScene.Backdrop(e.Graphics, this, ClientRectangle);
+            if (Theme.Aero) ThemeArt.AeroEdge(e.Graphics, r, radius, Theme.Border);
+            else if (Theme.Liquid) GlassScene.Rim(e.Graphics, r, radius);
+            else using (Pen edge = new Pen(Theme.Border)) e.Graphics.DrawPath(edge, path);
+            e.Graphics.Restore(state);
+        }
     }
 }
